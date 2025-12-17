@@ -276,7 +276,7 @@ export const renderScene = (
             ctx.strokeStyle = document.documentElement.classList.contains('dark') ? '#4b5563' : '#9ca3af';
 
             ctx.beginPath();
-            ctx.rect(element.x, element.y, element.width, element.height);
+            ctx.roundRect(element.x, element.y, element.width, element.height, 8);
 
             if (element.backgroundColor !== "transparent") {
                 ctx.fillStyle = element.backgroundColor;
