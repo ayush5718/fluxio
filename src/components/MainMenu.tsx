@@ -12,16 +12,28 @@ interface MainMenuProps {
     onOpenHelp: () => void;
 }
 
-const BACKGROUND_COLORS = [
-    "#ffffff", "#f8f9fa", "#ffc9c9", "#fcc2d7",
-    "#eebefa", "#d0bfff", "#a5d8ff", "#99e9f2",
-    "#96f2d7", "#b2f2bb", "#d8f5a2", "#ffec99", "#ffc078",
-    "#121212", "#1e1e1e", "#343a40" // Dark modes
-];
+const CANVAS_BACKGROUNDS = {
+    light: [
+        "#ffffff", // White
+        "#f8f9fa", // Gray 50
+        "#fffaff", // Floral White
+        "#e3fafc", // Cyan 50 (Muted)
+        "#fff9db", // Yellow 50 (Muted)
+    ],
+    dark: [
+        "#121212", // Default Dark
+        "#1e1e1e", // Excalidraw Dark
+        "#232329", // Dark Blue Gray
+        "#2c2c2c", // Graphite
+        "#18181b", // Zinc 900
+    ]
+};
 
 const MainMenu: React.FC<MainMenuProps> = ({ appState, setAppState, onClearCanvas, onThemeChange, theme, onOpenHelp }) => {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
+
+    const backgroundColors = theme === 'light' ? CANVAS_BACKGROUNDS.light : CANVAS_BACKGROUNDS.dark;
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -57,12 +69,12 @@ const MainMenu: React.FC<MainMenuProps> = ({ appState, setAppState, onClearCanva
                             <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">
                                 <Palette size={16} /> Canvas Background
                             </div>
-                            <div className="grid grid-cols-7 gap-1.5">
-                                {BACKGROUND_COLORS.slice(0, 14).map(color => (
+                            <div className="flex gap-2">
+                                {backgroundColors.map(color => (
                                     <button
                                         key={color}
                                         onClick={() => setAppState(prev => ({ ...prev, viewBackgroundColor: color }))}
-                                        className={`w-6 h-6 rounded-md border border-black/5 dark:border-white/10 shadow-sm transition-transform hover:scale-110 relative ${appState.viewBackgroundColor === color ? 'ring-2 ring-violet-500 z-10' : ''}`}
+                                        className={`w-8 h-8 rounded-lg border border-black/5 dark:border-white/10 shadow-sm transition-transform hover:scale-110 relative ${appState.viewBackgroundColor === color ? 'ring-2 ring-violet-500 z-10' : ''}`}
                                         style={{ backgroundColor: color }}
                                         title={color}
                                     />
@@ -87,16 +99,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ appState, setAppState, onClearCanva
                         >
                             <Trash2 size={16} />
                             <span>Reset Canvas</span>
-                        </button>
-
-                        <div className="h-[1px] bg-gray-100 dark:bg-gray-800 my-2" />
-
-                        <button
-                            onClick={() => { onOpenHelp(); setIsOpen(false); }}
-                            className="w-full flex items-center gap-3 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                        >
-                            <HelpCircle size={16} />
-                            <span>Help & Shortcuts</span>
                         </button>
 
                         <div className="px-3 py-2 text-[10px] text-gray-400 text-center">

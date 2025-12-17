@@ -118,45 +118,44 @@ const drawLockIcon = (ctx: CanvasRenderingContext2D, x: number, y: number, size:
 };
 
 // --- Welcome Screen Logic ---
+// --- Welcome Screen Logic ---
 const drawWelcomeScreen = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     ctx.save();
     const isDark = document.documentElement.classList.contains('dark');
     const primaryColor = isDark ? '#a78bfa' : '#7c3aed'; // Violet-ish
     const textColor = isDark ? '#94a3b8' : '#64748b'; // Gray-500
+    const hintColor = isDark ? '#cbd5e1' : '#475569'; // Simple Hint Text
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
     // 1. Center Logo Text
-    ctx.font = 'bold 60px "Kalam", cursive';
+    ctx.font = 'bold 80px "Kalam", cursive';
     ctx.fillStyle = primaryColor;
-    ctx.fillText("FLUXIO", width / 2, height / 2 - 40);
+    ctx.fillText("FLUXIO", width / 2, height / 2 - 80);
 
     // 2. Subtitle
     ctx.font = '24px "Kalam", cursive';
     ctx.fillStyle = textColor;
-    ctx.fillText("AI-Enhanced Virtual Whiteboard", width / 2, height / 2 + 10);
-    ctx.fillText("Your data is saved locally in your browser.", width / 2, height / 2 + 40);
+    ctx.fillText("AI-Enhanced Virtual Whiteboard", width / 2, height / 2 - 10);
+    ctx.fillText("Your data is saved locally in your browser.", width / 2, height / 2 + 25);
 
-    // 3. Hints List (Center-bottom)
-    const shortcuts = [
-        { label: "Open Command Palette", keys: "Ctrl/Cmd + K" },
-        { label: "Help & Shortcuts", keys: "?" },
-        { label: "AI Generation", keys: "Toolbar > Wand" },
+    // 3. Simple Centered Help Text
+    ctx.font = '16px "Inter", sans-serif';
+    ctx.fillStyle = hintColor;
+
+    let infoY = height / 2 + 100;
+    const spacing = 28;
+
+    const infoLines = [
+        "Pick a tool from the top toolbar to start drawing.",
+        "Use the menu (top-right) for background & dark mode.",
+        "Need help? Click the question mark at the bottom-right."
     ];
 
-    let startY = height / 2 + 100;
-    ctx.font = '18px "Inter", sans-serif';
-
-    shortcuts.forEach(s => {
-        ctx.fillStyle = isDark ? '#cbd5e1' : '#475569';
-        ctx.textAlign = "right";
-        ctx.fillText(s.label, width / 2 - 20, startY);
-
-        ctx.fillStyle = isDark ? '#64748b' : '#94a3b8';
-        ctx.textAlign = "left";
-        ctx.fillText(s.keys, width / 2 + 20, startY);
-        startY += 30;
+    infoLines.forEach(line => {
+        ctx.fillText(line, width / 2, infoY);
+        infoY += spacing;
     });
 
     ctx.restore();

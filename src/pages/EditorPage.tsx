@@ -1085,7 +1085,16 @@ const EditorPage = () => {
                         }
                     }}
                     theme={theme}
-                    onThemeChange={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
+                    onThemeChange={() => {
+                        setTheme(t => {
+                            const newTheme = t === 'light' ? 'dark' : 'light';
+                            setAppState(prev => ({
+                                ...prev,
+                                viewBackgroundColor: newTheme === 'dark' ? '#121212' : '#ffffff'
+                            }));
+                            return newTheme;
+                        });
+                    }}
                     onOpenHelp={() => setIsHelpOpen(true)}
                 />
             </div>
