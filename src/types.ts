@@ -56,6 +56,9 @@ export interface ExcalidrawElement {
   frameId?: string;
   name?: string;
   seed: number; // For RoughJS deterministic rendering
+  fillStyle?: "hachure" | "cross-hatch" | "solid" | "hollow";
+  angle?: number;
+  roundness?: number;
   // Icon specific properties
   iconPath?: string;
 }
@@ -85,6 +88,9 @@ export interface AppState {
   selectedElementIds: string[];
   editingElementId: string | null;
   resizingState: ResizingState | null;
+  fillStyle: "hachure" | "cross-hatch" | "solid" | "hollow";
+  showGrid: boolean;
+  snapToGrid: boolean;
 }
 
 export const TOOLS: { id: ToolType; icon: string; label: string; shortcut: string }[] = [

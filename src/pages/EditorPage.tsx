@@ -9,6 +9,7 @@ import IconLibrary from '../components/IconLibrary';
 import QuickActions from '../components/QuickActions';
 import HelpDialog from '../components/HelpDialog';
 import MainMenu from '../components/MainMenu';
+import ExportModal from '../components/ExportModal';
 import { AppState, ExcalidrawElement, Point, ToolType, TOOLS, Binding } from '../types';
 import { renderScene, getFontFamilyString, getFontString, measureText } from '../utils/renderer';
 import {
@@ -35,23 +36,51 @@ import { Sun, Moon, HelpCircle } from 'lucide-react';
 
 const EditorPage = () => {
     // --- State ---
-    const [elements, setElements] = useState<ExcalidrawElement[]>([]);
-    const [appState, setAppState] = useState<AppState>({
-        tool: "selection",
-        strokeColor: "#000000",
-        backgroundColor: "transparent",
-        strokeWidth: 2,
-        strokeStyle: "solid", // Initialized
-        fillStyle: "hachure", // Initialized
-        opacity: 100,
-        pan: { x: 0, y: 0 },
-        zoom: 1,
-        isDragging: false,
-        selectionStart: null,
-        selectionBox: null,
-        selectedElementIds: [],
-        editingElementId: null,
-        resizingState: null,
+    const [elements, setElements] = useState<ExcalidrawElement[]>(() => {
+        const saved = localStorage.getItem('fluxio-elements');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [appState, setAppState] = useState<AppState>(() => {
+        const saved = localStorage.getItem('fluxio-state');
+        const defaultState: AppState = {
+            tool: "selection",
+            strokeColor: "#000000",
+            backgroundColor: "transparent",
+            viewBackgroundColor: "#f8f9fa",
+            strokeWidth: 2,
+            strokeStyle: "solid",
+            fillStyle: "hachure",
+            opacity: 100,
+            pan: { x: 0, y: 0 },
+            zoom: 1,
+            isDragging: false,
+            selectionStart: null,
+            selectionBox: null,
+            selectedElementIds: [],
+            editingElementId: null,
+            resizingState: null,
+            showGrid: true,
+            snapToGrid: true,
+        };
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                // Reset transient states
+                return {
+                    ...defaultState,
+                    ...parsed,
+                    isDragging: false,
+                    selectionStart: null,
+                    selectionBox: null,
+                    selectedElementIds: [],
+                    editingElementId: null,
+                    resizingState: null
+                };
+            } catch (e) {
+                return defaultState;
+            }
+        }
+        return defaultState;
     });
 
     const [clipboard, setClipboard] = useState<ExcalidrawElement[] | null>(null);
@@ -60,10 +89,7 @@ const EditorPage = () => {
     const [laserTrails, setLaserTrails] = useState<{ x: number, y: number, time: number }[][]>([]);
     const currentLaserRef = useRef<{ x: number, y: number, time: number }[]>([]);
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('theme') as 'light' | 'dark' || 'light';
-        }
-        return 'light';
+        return localStorage.getItem('theme') as 'light' | 'dark' || 'light';
     });
 
     // History Hook
@@ -77,6 +103,7 @@ const EditorPage = () => {
     const [isLibraryOpen, setIsLibraryOpen] = useState(false);
     const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     const [tempElement, setTempElement] = useState<ExcalidrawElement | null>(null);
 
@@ -106,10 +133,17 @@ const EditorPage = () => {
     }, [appState.editingElementId]);
 
     useEffect(() => {
+        const { isDragging, selectionStart, selectionBox, selectedElementIds, editingElementId, resizingState, pan, zoom, ...persistentState } = appState;
+        localStorage.setItem('fluxio-elements', JSON.stringify(elements));
+        localStorage.setItem('fluxio-state', JSON.stringify(persistentState));
+    }, [elements, appState.strokeColor, appState.backgroundColor, appState.strokeWidth, appState.strokeStyle, appState.fillStyle, appState.opacity, appState.showGrid, appState.viewBackgroundColor, appState.snapToGrid]);
+
+    useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const handleWheel = (e: WheelEvent) => {
+            if (e.target !== canvas) return;
             e.preventDefault();
 
             if (e.ctrlKey || e.metaKey) {
@@ -145,21 +179,38 @@ const EditorPage = () => {
     }, []);
 
     useEffect(() => {
+        if (laserTrails.length === 0) return;
+
         let animationFrameId: number;
         const loop = () => {
-            if (laserTrails.length > 0) {
-                const now = Date.now();
-                const activeTrails = laserTrails.map(trail => {
-                    if (trail === currentLaserRef.current && appState.isDragging && appState.tool === 'laser') {
-                        return trail;
-                    }
-                    return trail.filter(p => now - p.time < 1000);
-                }).filter(trail => trail.length > 0);
+            const now = Date.now();
+            let changed = false;
+
+            const activeTrails = laserTrails.map(trail => {
+                const isCurrent = trail === currentLaserRef.current && appState.isDragging && appState.tool === 'laser';
+                if (isCurrent) return trail;
+
+                const filtered = trail.filter(p => now - p.time < 1000);
+                if (filtered.length !== trail.length) changed = true;
+                return filtered;
+            }).filter(trail => {
+                if (trail.length === 0) {
+                    changed = true;
+                    return false;
+                }
+                return true;
+            });
+
+            if (changed) {
                 setLaserTrails(activeTrails);
             }
-            animationFrameId = requestAnimationFrame(loop);
+
+            if (activeTrails.length > 0) {
+                animationFrameId = requestAnimationFrame(loop);
+            }
         };
-        if (laserTrails.length > 0) loop();
+
+        animationFrameId = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(animationFrameId);
     }, [laserTrails, appState.isDragging, appState.tool]);
 
@@ -358,14 +409,30 @@ const EditorPage = () => {
         switch (action) {
             case 'library': setIsLibraryOpen(true); break;
             case 'ai': setIsGeminiOpen(true); break;
-            case 'theme': setTheme(t => t === 'light' ? 'dark' : 'light'); break;
+            case 'theme': handleToggleTheme(); break;
             case 'clear':
                 if (window.confirm('Clear canvas?')) {
                     setElements([]);
                     clearHistory();
                 }
                 break;
+            case 'export': handleExport(); break;
         }
+    };
+
+    const handleToggleTheme = () => {
+        setTheme(t => {
+            const newTheme = t === 'light' ? 'dark' : 'light';
+            setAppState(prev => ({
+                ...prev,
+                viewBackgroundColor: newTheme === 'dark' ? '#121212' : '#f8f9fa'
+            }));
+            return newTheme;
+        });
+    };
+
+    const handleExport = () => {
+        setIsExportModalOpen(true);
     };
 
     const shouldShowSnapPoints = (appState.tool === 'arrow' || appState.tool === 'line') ||
@@ -384,8 +451,8 @@ const EditorPage = () => {
         canvas.style.height = `${window.innerHeight}px`;
         ctx.scale(dpr, dpr);
         const elementsToRender = tempElement ? [...elements, tempElement] : elements;
-        renderScene(ctx, elementsToRender, appState.pan, appState.zoom, appState.selectedElementIds, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints);
-    }, [elements, tempElement, appState.pan, appState.zoom, appState.selectedElementIds, theme, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints]);
+        renderScene(ctx, elementsToRender, appState.pan, appState.zoom, appState.selectedElementIds, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints, theme, appState.showGrid);
+    }, [elements, tempElement, appState.pan, appState.zoom, appState.selectedElementIds, theme, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints, appState.showGrid]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -399,7 +466,7 @@ const EditorPage = () => {
                 if (ctx) {
                     ctx.scale(dpr, dpr);
                     const elementsToRender = tempElement ? [...elements, tempElement] : elements;
-                    renderScene(ctx, elementsToRender, appState.pan, appState.zoom, appState.selectedElementIds, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints);
+                    renderScene(ctx, elementsToRender, appState.pan, appState.zoom, appState.selectedElementIds, highlightedElementId, appState.selectionBox, laserTrails, appState.editingElementId, shouldShowSnapPoints, theme, appState.showGrid);
                 }
             }
         };
@@ -436,15 +503,42 @@ const EditorPage = () => {
             if (isCtrl) {
                 switch (e.key.toLowerCase()) {
                     case 'z': e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
-                    case 'c': e.preventDefault(); copySelection(); return;
+                    case 'c':
+                        e.preventDefault();
+                        if (isShift) {
+                            handleExport(); // Open modal for specific export/copy
+                        } else {
+                            copySelection();
+                        }
+                        return;
                     case 'x': e.preventDefault(); cutSelection(); return;
                     case 'v': e.preventDefault(); pasteFromClipboard(); return;
                     case 'd': e.preventDefault(); duplicateSelection(); return;
                     case 'a': e.preventDefault(); setAppState(prev => ({ ...prev, selectedElementIds: elements.map(el => el.id) })); return;
                     case 'g': e.preventDefault(); if (e.shiftKey) handleUngroup(); else handleGroup(); return;
                     case 'l': e.preventDefault(); if (isShift) handleToggleLock(); return;
+                    case '0': e.preventDefault(); setAppState(prev => ({ ...prev, zoom: 1, pan: { x: 0, y: 0 } })); return;
+                    case '+':
+                    case '=':
+                        e.preventDefault();
+                        setAppState(prev => ({ ...prev, zoom: Math.min(5, prev.zoom * 1.1) }));
+                        return;
+                    case '-':
+                    case '_':
+                        e.preventDefault();
+                        setAppState(prev => ({ ...prev, zoom: Math.max(0.1, prev.zoom / 1.1) }));
+                        return;
+                    case ']': e.preventDefault(); handleLayerChange(isShift ? 'front' : 'forward'); return;
+                    case '[': e.preventDefault(); handleLayerChange(isShift ? 'back' : 'backward'); return;
                 }
             }
+
+            if (e.key.toLowerCase() === 'g' && !isCtrl) {
+                e.preventDefault();
+                setAppState(prev => ({ ...prev, showGrid: !prev.showGrid }));
+                return;
+            }
+
             const tool = TOOLS.find(t => t.shortcut === e.key);
             if (tool) setAppState(prev => ({ ...prev, tool: tool.id }));
             if (e.key === 'Delete' || e.key === 'Backspace') handleDelete();
@@ -544,35 +638,36 @@ const EditorPage = () => {
 
         // --- Resizing Check ---
         if (appState.tool === 'selection' && appState.selectedElementIds.length === 1) {
-            const element = elements.find(el => el.id === appState.selectedElementIds[0]);
-            if (element) {
+            const selectedId = appState.selectedElementIds[0];
+            const selectedEl = elements.find(el => el.id === selectedId);
+            if (selectedEl) {
                 // Check if locked
-                if (element.isLocked) {
-                    // If locked, skip resizing
+                if (selectedEl.isLocked) {
+                    // If locked, skip
                 } else {
-                    let handle = getResizeHandleAtPosition(pos.x, pos.y, element, appState.zoom);
+                    let handle = getResizeHandleAtPosition(pos.x, pos.y, selectedEl, appState.zoom);
 
                     // Handle Midpoint Creation
                     if (typeof handle === 'string' && handle.startsWith('m:')) {
                         const idx = parseInt(handle.split(':')[1]);
-                        if (!isNaN(idx) && element.points) {
-                            const p1 = element.points[idx];
-                            const p2 = element.points[idx + 1];
+                        if (!isNaN(idx) && selectedEl.points) {
+                            const p1 = selectedEl.points[idx];
+                            const p2 = selectedEl.points[idx + 1];
                             const midX = (p1.x + p2.x) / 2;
                             const midY = (p1.y + p2.y) / 2;
 
-                            const newPoints = [...element.points];
+                            const newPoints = [...selectedEl.points];
                             newPoints.splice(idx + 1, 0, { x: midX, y: midY });
 
-                            const newElement = { ...element, points: newPoints };
-                            updateElements(elements.map(el => el.id === element.id ? newElement : el));
+                            const newElement = { ...selectedEl, points: newPoints };
+                            updateElements(elements.map(el => el.id === selectedEl.id ? newElement : el));
                             handle = `p:${idx + 1}`;
 
                             setAppState(prev => ({
                                 ...prev,
                                 isDragging: true,
                                 resizingState: {
-                                    elementId: element.id,
+                                    elementId: selectedEl.id,
                                     handle: handle as any,
                                     startMousePos: pos,
                                     originalElement: newElement
@@ -587,24 +682,22 @@ const EditorPage = () => {
                             ...prev,
                             isDragging: true,
                             resizingState: {
-                                elementId: element.id,
+                                elementId: selectedEl.id,
                                 handle,
                                 startMousePos: pos,
-                                originalElement: { ...element, points: element.points ? [...element.points] : undefined }
+                                originalElement: { ...selectedEl, points: selectedEl.points ? [...selectedEl.points] : undefined }
                             }
                         }));
                         return;
                     }
 
-                    // --- Smart Connectors Check ---
-                    const connectorKey = getConnectorHandleAtPosition(pos.x, pos.y, element, appState.zoom);
+                    const connectorKey = getConnectorHandleAtPosition(pos.x, pos.y, selectedEl, appState.zoom);
                     if (connectorKey) {
-                        // Start Smart Arrow
                         const anchorMap: Record<string, 'top' | 'right' | 'bottom' | 'left'> = {
                             'n': 'top', 'e': 'right', 's': 'bottom', 'w': 'left'
                         };
                         const anchor = anchorMap[connectorKey as string];
-                        const startPoint = getAnchorPosition(element, anchor);
+                        const startPoint = getAnchorPosition(selectedEl, anchor);
 
                         setAppState(prev => ({ ...prev, tool: 'arrow', isDragging: true, selectionStart: pos }));
 
@@ -622,8 +715,8 @@ const EditorPage = () => {
                             strokeStyle: appState.strokeStyle,
                             fillStyle: appState.fillStyle,
                             opacity: appState.opacity,
-                            points: [{ x: 0, y: 0 }, { x: 0, y: 0 }], // Start with 0 length
-                            startBinding: { elementId: element.id, anchor },
+                            points: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+                            startBinding: { elementId: selectedId, anchor },
                             seed: Math.floor(Math.random() * 2 ** 31)
                         };
                         setTempElement(newArrow);
@@ -631,14 +724,6 @@ const EditorPage = () => {
                     }
                 }
             }
-        }
-
-        if (appState.tool === 'laser') {
-            const startPoint = { x: pos.x, y: pos.y, time: Date.now() };
-            currentLaserRef.current = [startPoint];
-            setLaserTrails(prev => [...prev, currentLaserRef.current]);
-            setAppState(prev => ({ ...prev, isDragging: true }));
-            return;
         }
 
         if (appState.tool === 'selection') {
@@ -675,7 +760,10 @@ const EditorPage = () => {
 
         if (appState.tool === 'eraser') {
             const element = getElementAtPosition(pos.x, pos.y, elements);
-            if (element && !element.isLocked) updateElements(elements.filter(el => el.id !== element.id), true);
+            if (element && !element.isLocked) {
+                updateElements(elements.filter(el => el.id !== element.id), true);
+            }
+            setAppState(prev => ({ ...prev, isDragging: true, selectionStart: pos }));
             return;
         }
 
@@ -686,7 +774,8 @@ const EditorPage = () => {
                 id, type: 'text', x: pos.x, y: pos.y, width: 20, height: 24, strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor, strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20, fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid", seed: Math.floor(Math.random() * 2 ** 31), fillStyle: appState.fillStyle
             };
             setElements([...elements, newEl]);
-            setAppState(prev => ({ ...prev, tool: 'selection', editingElementId: id, selectedElementIds: [id] }));
+            setAppState(prev => ({ ...prev, tool: 'selection', editingElementId: id, selectedElementIds: [id], isDragging: false }));
+            document.body.style.cursor = 'text';
             return;
         }
 
@@ -735,7 +824,8 @@ const EditorPage = () => {
             points: initialPoints,
             startBinding,
             name,
-            seed: Math.floor(Math.random() * 2 ** 31)
+            seed: Math.floor(Math.random() * 2 ** 31),
+            roundness: appState.tool === 'rectangle' ? 12 : 0
         };
         setTempElement(newElement);
     };
@@ -782,7 +872,13 @@ const EditorPage = () => {
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
-        const pos = getPointerPos(e);
+        let pos = getPointerPos(e);
+        if (appState.snapToGrid) {
+            pos = {
+                x: Math.round(pos.x / 20) * 20,
+                y: Math.round(pos.y / 20) * 20
+            };
+        }
         const hoveredEl = getElementAtPosition(pos.x, pos.y, elements);
 
         // --- Cursor Updates & Highlight Logic ---
@@ -790,26 +886,51 @@ const EditorPage = () => {
             if (appState.tool === 'selection') {
                 setHighlightedElementId(hoveredEl ? hoveredEl.id : null);
 
+                if (hoveredEl) {
+                    document.body.style.cursor = 'move';
+                } else {
+                    document.body.style.cursor = 'default';
+                }
+
                 if (appState.selectedElementIds.length === 1) {
                     const selectedEl = elements.find(el => el.id === appState.selectedElementIds[0]);
-                    if (selectedEl && !selectedEl.isLocked) {
-                        const handle = getResizeHandleAtPosition(pos.x, pos.y, selectedEl, appState.zoom);
-                        if (handle) {
-                            document.body.style.cursor = getCursorForHandle(handle);
-                            return;
-                        }
+                    const handle = getResizeHandleAtPosition(pos.x, pos.y, selectedEl, appState.zoom);
+                    if (handle) {
+                        document.body.style.cursor = getCursorForHandle(handle);
+                        return;
+                    }
+                    const conn = getConnectorHandleAtPosition(pos.x, pos.y, selectedEl, appState.zoom);
+                    if (conn) {
+                        document.body.style.cursor = 'copy';
+                        return;
                     }
                 }
-                document.body.style.cursor = hoveredEl ? 'move' : 'default';
             } else if (appState.tool === 'arrow' || appState.tool === 'line') {
                 setHighlightedElementId(hoveredEl ? hoveredEl.id : null);
                 document.body.style.cursor = 'crosshair';
+            } else if (appState.tool === 'text') {
+                document.body.style.cursor = 'text';
+            } else if (appState.tool === 'eraser') {
+                setHighlightedElementId(hoveredEl ? hoveredEl.id : null);
+                document.body.style.cursor = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3E%3Cpath d=\'m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l12-12c1-1 2.5-1 3.4 0l4.3 4.3c1 1 1 2.5 0 3.4l-7 7\'/%3E%3Cpath d=\'M5 11l9 9\'/%3E%3Cpath d=\'m15 5 4 4\'/%3E%3Cpath d=\'M22 21H7\'/%3E%3C/svg%3E") 0 24, auto';
             } else {
                 setHighlightedElementId(null);
-                document.body.style.cursor = 'default';
+                document.body.style.cursor = 'crosshair';
             }
-        } else {
-            // Dragging logic for highlighting (snap targets)
+        }
+        else {
+            // Dragging logic
+            if (appState.tool === 'eraser' && e.buttons === 1) {
+                const element = getElementAtPosition(pos.x, pos.y, elements);
+                if (element && !element.isLocked) {
+                    const newElements = elements.filter(el => el.id !== element.id);
+                    if (newElements.length !== elements.length) {
+                        updateElements(newElements, false); // Don't save history for every tiny drag step
+                    }
+                }
+                return;
+            }
+
             if (tempElement && (tempElement.type === 'arrow' || tempElement.type === 'line')) {
                 setHighlightedElementId(hoveredEl ? hoveredEl.id : null);
             } else if (appState.resizingState) {
@@ -829,21 +950,14 @@ const EditorPage = () => {
             // Dynamic Binding Logic
             if ((originalElement.type === 'arrow' || originalElement.type === 'line') && (handle === 'start' || handle === 'end')) {
                 if (hoveredEl) {
-                    // Find the "fixed" point of the arrow (the one we aren't dragging)
-                    // If dragging start (index 0), fixed is end (index -1). And vice versa.
                     const fixedIdx = handle === 'start' ? originalElement.points!.length - 1 : 0;
                     const fixedPointRel = originalElement.points![fixedIdx];
                     const fixedPointAbs = {
                         x: originalElement.x + fixedPointRel.x,
                         y: originalElement.y + fixedPointRel.y
                     };
-
-                    // Calculate intersection: Ray from FixedPoint -> HoveredShape Center
-                    // This gives the clean "center-pointing" arrow effect
                     const intersect = getIntersectingPoint(hoveredEl, fixedPointAbs);
-
                     newPos = intersect;
-                    // We use 'center' as a marker for dynamic binding (needs type update or cast)
                     // @ts-ignore
                     binding = { elementId: hoveredEl.id, anchor: 'center' };
                 }
@@ -893,105 +1007,81 @@ const EditorPage = () => {
             const dx = pos.x - appState.selectionStart.x;
             const dy = pos.y - appState.selectionStart.y;
 
+            if (dx === 0 && dy === 0) return;
+
             if (appState.selectedElementIds.length > 0) {
-                const updatedMap = new Map<string, ExcalidrawElement>();
+                const updatedElementsMap = new Map<string, ExcalidrawElement>();
+                const allElementsMap = new Map<string, ExcalidrawElement>(elements.map(e => [e.id, e]));
+                const selectedIds = new Set(appState.selectedElementIds);
 
                 const selectedFrameIds = elements
-                    .filter(e => appState.selectedElementIds.includes(e.id) && e.type === 'frame')
+                    .filter(e => selectedIds.has(e.id) && e.type === 'frame')
                     .map(e => e.id);
 
                 const elementsToMove = elements.filter(el => {
                     if (el.isLocked) return false;
-                    const isSelected = appState.selectedElementIds.includes(el.id);
-                    const isChildOfSelectedFrame = el.frameId && selectedFrameIds.includes(el.frameId);
-                    return isSelected || isChildOfSelectedFrame;
+                    return selectedIds.has(el.id) || (el.frameId && selectedFrameIds.includes(el.frameId));
                 });
 
                 const elementsToMoveIds = new Set(elementsToMove.map(e => e.id));
 
-                const movedElements = elements.map(el => {
+                // Single pass to move and bind
+                const nextElements = elements.map(el => {
+                    let subject = el;
                     if (elementsToMoveIds.has(el.id)) {
-                        const newEl = { ...el, x: el.x + dx, y: el.y + dy };
-                        updatedMap.set(el.id, newEl);
-                        return newEl;
+                        subject = { ...el, x: el.x + dx, y: el.y + dy };
+                        updatedElementsMap.set(el.id, subject);
                     }
-                    return el;
+                    return subject;
                 });
 
-                const finalElements = movedElements.map(el => {
-                    // Only update arrow/line if they have points
+                const finalElements = nextElements.map(el => {
                     if ((el.type === 'arrow' || el.type === 'line') && el.points) {
                         let newX = el.x;
                         let newY = el.y;
                         let newPoints = [...el.points];
-
-                        let startAnchorPos: Point | null = null;
-                        let endAnchorPos: Point | null = null;
                         let updatedStart = false;
                         let updatedEnd = false;
 
                         // Start Binding
-                        if (el.startBinding && updatedMap.has(el.startBinding.elementId)) {
-                            const target = updatedMap.get(el.startBinding.elementId)!;
-                            const anchor = getAnchorPosition(target, el.startBinding.anchor);
-                            startAnchorPos = anchor;
-
+                        if (el.startBinding && updatedElementsMap.has(el.startBinding.elementId)) {
+                            const target = updatedElementsMap.get(el.startBinding.elementId)!;
+                            const anchorPos = getAnchorPosition(target, el.startBinding.anchor);
                             const oldAbsX = newX;
                             const oldAbsY = newY;
-
-                            newX = anchor.x;
-                            newY = anchor.y;
+                            newX = anchorPos.x;
+                            newY = anchorPos.y;
                             updatedStart = true;
 
                             if (!elementsToMoveIds.has(el.id)) {
-                                // If arrow didn't move globally, shift points to keep end in place relative to canvas
                                 const shiftX = newX - oldAbsX;
                                 const shiftY = newY - oldAbsY;
-                                newPoints = newPoints.map((p, i) => {
-                                    if (i === 0) return { x: 0, y: 0 };
-                                    return { x: p.x - shiftX, y: p.y - shiftY };
-                                });
+                                newPoints = newPoints.map((p, i) => i === 0 ? { x: 0, y: 0 } : { x: p.x - shiftX, y: p.y - shiftY });
                             } else {
-                                // If arrow moved too, just ensure origin is correct
                                 newPoints[0] = { x: 0, y: 0 };
                             }
-                        } else {
-                            // If start not bound, calculate its current absolute pos for potential orthogonal calc
-                            startAnchorPos = { x: el.x, y: el.y };
                         }
 
                         // End Binding
-                        if (el.endBinding && updatedMap.has(el.endBinding.elementId)) {
-                            const target = updatedMap.get(el.endBinding.elementId)!;
-                            const anchor = getAnchorPosition(target, el.endBinding.anchor);
-                            endAnchorPos = anchor;
-
-                            // End Point is relative to newX, newY
-                            const relX = anchor.x - newX;
-                            const relY = anchor.y - newY;
-
-                            newPoints[newPoints.length - 1] = { x: relX, y: relY };
+                        if (el.endBinding && updatedElementsMap.has(el.endBinding.elementId)) {
+                            const target = updatedElementsMap.get(el.endBinding.elementId)!;
+                            const anchorPos = getAnchorPosition(target, el.endBinding.anchor);
+                            newPoints[newPoints.length - 1] = { x: anchorPos.x - newX, y: anchorPos.y - newY };
                             updatedEnd = true;
-                        } else {
-                            // End not bound, calculate current abs end
-                            const lastP = el.points[el.points.length - 1];
-                            endAnchorPos = { x: el.x + lastP.x, y: el.y + lastP.y };
                         }
 
-                        // Smart Routing with Dynamic Anchors
-                        if ((updatedStart || updatedEnd) && el.startBinding && el.endBinding && startAnchorPos && endAnchorPos) {
-                            const startEl = updatedMap.get(el.startBinding.elementId) || elements.find(e => e.id === el.startBinding!.elementId);
-                            const endEl = updatedMap.get(el.endBinding.elementId) || elements.find(e => e.id === el.endBinding!.elementId);
-
+                        // Smart Routing (if both bound and at least one moved)
+                        if ((updatedStart || updatedEnd) && el.startBinding && el.endBinding) {
+                            const startEl = updatedElementsMap.get(el.startBinding.elementId) || allElementsMap.get(el.startBinding.elementId);
+                            const endEl = updatedElementsMap.get(el.endBinding.elementId) || allElementsMap.get(el.endBinding.elementId);
                             if (startEl && endEl) {
                                 const { start, end } = getSmartAnchors(startEl, endEl);
-                                el.startBinding = { ...el.startBinding, anchor: start };
-                                el.endBinding = { ...el.endBinding, anchor: end };
-                                startAnchorPos = getAnchorPosition(startEl, start);
-                                endAnchorPos = getAnchorPosition(endEl, end);
-                                newX = startAnchorPos.x;
-                                newY = startAnchorPos.y;
-                                newPoints = generateOrthogonalPoints(startAnchorPos, endAnchorPos, start, end, startEl, endEl);
+                                const startP = getAnchorPosition(startEl, start);
+                                const endP = getAnchorPosition(endEl, end);
+                                newX = startP.x;
+                                newY = startP.y;
+                                newPoints = generateOrthogonalPoints(startP, endP, start, end, startEl, endEl);
+                                return { ...el, x: newX, y: newY, points: newPoints, startBinding: { ...el.startBinding, anchor: start }, endBinding: { ...el.endBinding, anchor: end } };
                             }
                         }
 
@@ -1018,11 +1108,9 @@ const EditorPage = () => {
             let height = currentY - startY;
 
             if (tempElement.type === 'arrow' || tempElement.type === 'line') {
-                // For linear elements, we just set the end point
                 const points = tempElement.points ? [...tempElement.points] : [{ x: 0, y: 0 }];
                 if (points.length < 2) points.push({ x: 0, y: 0 });
 
-                // Smart snap for endpoint
                 if (hoveredEl) {
                     const snap = getClosestSnapPoint(pos.x, pos.y, hoveredEl);
                     if (snap) {
@@ -1037,7 +1125,6 @@ const EditorPage = () => {
                 const points = [...(tempElement.points || []), { x: width, y: height }];
                 setTempElement({ ...tempElement, width, height, points });
             } else {
-                // Shapes
                 let x = startX;
                 let y = startY;
 
@@ -1053,6 +1140,13 @@ const EditorPage = () => {
                 setTempElement({ ...tempElement, x, y, width, height });
             }
         }
+
+        // Safety: ensure cursor is crosshair if drawing, pencil if freedraw, etc.
+        if (appState.isDragging && tempElement) {
+            if (tempElement.type === 'freedraw') document.body.style.cursor = 'crosshair';
+            else if (['arrow', 'line'].includes(tempElement.type)) document.body.style.cursor = 'crosshair';
+            else document.body.style.cursor = 'crosshair';
+        }
     };
 
     const handleMouseUp = (e: React.MouseEvent) => {
@@ -1061,6 +1155,16 @@ const EditorPage = () => {
                 saveHistory(elements);
             } else if (tempElement) {
                 let finalElement = { ...tempElement };
+                const dist = finalElement.points && finalElement.points.length > 1
+                    ? Math.hypot(finalElement.points[finalElement.points.length - 1].x, finalElement.points[finalElement.points.length - 1].y)
+                    : Math.hypot(finalElement.width, finalElement.height);
+
+                // Ignore tiny elements from accidental clicks (especially from connector dots)
+                if (dist < 8) {
+                    setTempElement(null);
+                    setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, selectionBox: null, resizingState: null }));
+                    return;
+                }
 
                 // Commit Arrow/Line bindings
                 if ((finalElement.type === 'arrow' || finalElement.type === 'line')) {
@@ -1165,6 +1269,12 @@ const EditorPage = () => {
         setTempElement(null);
         setHighlightedElementId(null);
         currentLaserRef.current = [];
+        document.body.style.cursor = 'default';
+
+        // Final save history for eraser if we dragged
+        if (appState.tool === 'eraser' && appState.isDragging) {
+            saveHistory(elements);
+        }
     };
 
 
@@ -1172,9 +1282,16 @@ const EditorPage = () => {
     const handleTextBlur = () => {
         if (appState.editingElementId) {
             const el = elements.find(e => e.id === appState.editingElementId);
-            if (el && el.type === 'text' && (!el.text || el.text.trim() === '')) {
-                // Remove empty text element
-                updateElements(elements.filter(e => e.id !== el.id));
+            if (el && el.type === 'text') {
+                if (!el.text || el.text.trim() === '') {
+                    // Remove empty text element
+                    updateElements(elements.filter(e => e.id !== el.id));
+                } else {
+                    // Save history for non-empty text
+                    saveHistory(elements);
+                }
+            } else if (el && el.type === 'frame') {
+                saveHistory(elements);
             }
             setAppState(prev => ({ ...prev, editingElementId: null }));
         }
@@ -1198,17 +1315,9 @@ const EditorPage = () => {
                         }
                     }}
                     theme={theme}
-                    onThemeChange={() => {
-                        setTheme(t => {
-                            const newTheme = t === 'light' ? 'dark' : 'light';
-                            setAppState(prev => ({
-                                ...prev,
-                                viewBackgroundColor: newTheme === 'dark' ? '#121212' : '#ffffff'
-                            }));
-                            return newTheme;
-                        });
-                    }}
+                    onThemeChange={handleToggleTheme}
                     onOpenHelp={() => setIsHelpOpen(true)}
+                    onExport={handleExport}
                 />
             </div>
 
@@ -1266,7 +1375,7 @@ const EditorPage = () => {
                                 if (isFrame) {
                                     updateElements(elements.map(item => item.id === el.id ? { ...item, name: val } : item));
                                 } else {
-                                    // Fix: Trim trailing newline for measurement to prevent ghost lines? 
+                                    // Fix: Trim trailing newline for measurement to prevent ghost lines?
                                     // Actually, just measure EXACTLY what we have.
                                     // Renderer uses 1.25 line height.
                                     const metrics = measureText(val, el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle);
@@ -1274,6 +1383,16 @@ const EditorPage = () => {
                                 }
                             }}
                             onBlur={handleTextBlur}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    e.currentTarget.blur();
+                                }
+                                if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    e.currentTarget.blur();
+                                }
+                            }}
                             autoFocus
                             spellCheck={false}
                         />
@@ -1340,6 +1459,14 @@ const EditorPage = () => {
             <HelpDialog
                 isOpen={isHelpOpen}
                 onClose={() => setIsHelpOpen(false)}
+            />
+            <ExportModal
+                isOpen={isExportModalOpen}
+                onClose={() => setIsExportModalOpen(false)}
+                elements={elements}
+                selectedElementIds={appState.selectedElementIds}
+                viewBackgroundColor={appState.viewBackgroundColor}
+                theme={theme}
             />
 
             <ContextMenu

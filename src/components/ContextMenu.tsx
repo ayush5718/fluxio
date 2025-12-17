@@ -1,14 +1,14 @@
 
 import React, { useEffect, useRef } from 'react';
-import { 
-  Copy, 
-  Scissors, 
-  Clipboard, 
-  Trash2, 
-  CopyPlus, 
-  BringToFront, 
-  SendToBack, 
-  Group, 
+import {
+  Copy,
+  Scissors,
+  Clipboard,
+  Trash2,
+  CopyPlus,
+  BringToFront,
+  SendToBack,
+  Group,
   Ungroup,
   Lock,
   Unlock
@@ -25,20 +25,20 @@ interface ContextMenuProps {
   isLocked?: boolean;
 }
 
-const MenuItem = ({ 
-  icon: Icon, 
-  label, 
-  shortcut, 
-  onClick, 
-  disabled = false, 
-  danger = false 
-}: { 
-  icon?: any, 
-  label: string, 
-  shortcut?: string, 
-  onClick: () => void, 
-  disabled?: boolean, 
-  danger?: boolean 
+const MenuItem = ({
+  icon: Icon,
+  label,
+  shortcut,
+  onClick,
+  disabled = false,
+  danger = false
+}: {
+  icon?: any,
+  label: string,
+  shortcut?: string,
+  onClick: () => void,
+  disabled?: boolean,
+  danger?: boolean
 }) => (
   <button
     onClick={(e) => {
@@ -47,16 +47,16 @@ const MenuItem = ({
     }}
     disabled={disabled}
     className={`w-full flex items-center justify-between px-3 py-2 text-[13px] rounded-lg transition-colors group
-      ${disabled 
-        ? 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500' 
+      ${disabled
+        ? 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
         : danger
           ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20'
-          : 'text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-500/20 hover:text-violet-700 dark:hover:text-violet-200'
+          : 'text-gray-700 dark:text-gray-200 hover:bg-brand/10 hover:text-brand'
       }
     `}
   >
     <div className="flex items-center gap-2.5">
-      {Icon && <Icon size={14} className={danger ? "" : "text-gray-400 dark:text-gray-500 group-hover:text-violet-500 dark:group-hover:text-violet-300"} />}
+      {Icon && <Icon size={14} className={danger ? "" : "text-gray-400 dark:text-gray-500 group-hover:text-brand"} />}
       <span className="font-medium">{label}</span>
     </div>
     {shortcut && (
@@ -69,11 +69,11 @@ const Divider = () => (
   <div className="h-[1px] bg-gray-200/50 dark:bg-white/10 my-1 mx-2" />
 );
 
-const ContextMenu: React.FC<ContextMenuProps> = ({ 
-  position, 
-  onClose, 
-  onAction, 
-  hasSelection, 
+const ContextMenu: React.FC<ContextMenuProps> = ({
+  position,
+  onClose,
+  onAction,
+  hasSelection,
   hasMultipleSelection,
   hasClipboard,
   isGrouped,
@@ -100,7 +100,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   };
 
   return (
-    <div 
+    <div
       ref={menuRef}
       style={style}
       className="fixed z-[100] w-56 p-1.5
@@ -113,41 +113,41 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         animate-in fade-in zoom-in-95 duration-150 ease-out origin-top-left"
       onContextMenu={(e) => e.preventDefault()}
     >
-      <MenuItem 
-        icon={Clipboard} 
-        label="Paste" 
-        shortcut="Ctrl+V" 
-        onClick={() => onAction('paste')} 
+      <MenuItem
+        icon={Clipboard}
+        label="Paste"
+        shortcut="Ctrl+V"
+        onClick={() => onAction('paste')}
         disabled={!hasClipboard}
       />
-      
+
       <Divider />
 
-      <MenuItem 
-        icon={Copy} 
-        label="Copy" 
-        shortcut="Ctrl+C" 
-        onClick={() => onAction('copy')} 
+      <MenuItem
+        icon={Copy}
+        label="Copy"
+        shortcut="Ctrl+C"
+        onClick={() => onAction('copy')}
         disabled={!hasSelection}
       />
-      <MenuItem 
-        icon={Scissors} 
-        label="Cut" 
-        shortcut="Ctrl+X" 
-        onClick={() => onAction('cut')} 
+      <MenuItem
+        icon={Scissors}
+        label="Cut"
+        shortcut="Ctrl+X"
+        onClick={() => onAction('cut')}
         disabled={!hasSelection || isLocked}
       />
-      <MenuItem 
-        icon={CopyPlus} 
-        label="Duplicate" 
-        shortcut="Ctrl+D" 
-        onClick={() => onAction('duplicate')} 
+      <MenuItem
+        icon={CopyPlus}
+        label="Duplicate"
+        shortcut="Ctrl+D"
+        onClick={() => onAction('duplicate')}
         disabled={!hasSelection}
       />
 
       <Divider />
 
-      <MenuItem 
+      <MenuItem
         icon={isLocked ? Unlock : Lock}
         label={isLocked ? "Unlock" : "Lock"}
         shortcut="Ctrl+Shift+L"
@@ -157,27 +157,27 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
       <Divider />
 
-      <MenuItem 
-        icon={BringToFront} 
-        label="Bring to Front" 
-        onClick={() => onAction('layer-front')} 
+      <MenuItem
+        icon={BringToFront}
+        label="Bring to Front"
+        onClick={() => onAction('layer-front')}
         disabled={!hasSelection || isLocked}
       />
-      <MenuItem 
-        icon={SendToBack} 
-        label="Send to Back" 
-        onClick={() => onAction('layer-back')} 
+      <MenuItem
+        icon={SendToBack}
+        label="Send to Back"
+        onClick={() => onAction('layer-back')}
         disabled={!hasSelection || isLocked}
       />
 
       {(hasMultipleSelection || isGrouped) && (
         <>
-           <Divider />
-           <MenuItem 
-            icon={isGrouped ? Ungroup : Group} 
-            label={isGrouped ? "Ungroup" : "Group"} 
-            shortcut="Ctrl+G" 
-            onClick={() => onAction(isGrouped ? 'ungroup' : 'group')} 
+          <Divider />
+          <MenuItem
+            icon={isGrouped ? Ungroup : Group}
+            label={isGrouped ? "Ungroup" : "Group"}
+            shortcut="Ctrl+G"
+            onClick={() => onAction(isGrouped ? 'ungroup' : 'group')}
             disabled={isLocked}
           />
         </>
@@ -185,11 +185,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
       <Divider />
 
-      <MenuItem 
-        icon={Trash2} 
-        label="Delete" 
-        shortcut="Del" 
-        onClick={() => onAction('delete')} 
+      <MenuItem
+        icon={Trash2}
+        label="Delete"
+        shortcut="Del"
+        onClick={() => onAction('delete')}
         disabled={!hasSelection || isLocked}
         danger
       />

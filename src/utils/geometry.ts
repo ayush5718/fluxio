@@ -2,7 +2,7 @@
 import { ExcalidrawElement, Point, AnchorPosition, ResizeHandle } from "../types";
 import { measureText } from "./renderer";
 
-// --- Geometry Intersection Utils ---
+// --- Geometry Utils ---
 
 export const getElementBounds = (element: ExcalidrawElement) => {
     return {
@@ -15,83 +15,63 @@ export const getElementBounds = (element: ExcalidrawElement) => {
     };
 };
 
+const rotatePoint = (p: Point, center: Point, angle: number): Point => {
+    const s = Math.sin(angle);
+    const c = Math.cos(angle);
+    const px = p.x - center.x;
+    const py = p.y - center.y;
+    return {
+        x: px * c - py * s + center.x,
+        y: px * s + py * c + center.y
+    };
+};
+
 // Find intersection of line (p1->p2) with rectangle (x,y,w,h)
 const intersectLineRect = (p1: Point, p2: Point, x: number, y: number, w: number, h: number): Point | null => {
     const minX = x, maxX = x + w, minY = y, maxY = y + h;
     const points: Point[] = [];
-
-    // Liang-Barsky or simple 4-segment check
     const segments = [
         [{ x: minX, y: minY }, { x: maxX, y: minY }], // Top
         [{ x: maxX, y: minY }, { x: maxX, y: maxY }], // Right
         [{ x: maxX, y: maxY }, { x: minX, y: maxY }], // Bottom
         [{ x: minX, y: maxY }, { x: minX, y: minY }]  // Left
     ];
-
     segments.forEach(([a, b]) => {
         const det = (p2.x - p1.x) * (b.y - a.y) - (b.x - a.x) * (p2.y - p1.y);
         if (det === 0) return;
         const lambda = ((b.y - a.y) * (b.x - p1.x) + (a.x - b.x) * (b.y - p1.y)) / det;
         const gamma = ((p1.y - p2.y) * (b.x - p1.x) + (p2.x - p1.x) * (b.y - p1.y)) / det;
         if (0 <= lambda && lambda <= 1 && 0 <= gamma && gamma <= 1) {
-            points.push({
-                x: p1.x + lambda * (p2.x - p1.x),
-                y: p1.y + lambda * (p2.y - p1.y)
-            });
+            points.push({ x: p1.x + lambda * (p2.x - p1.x), y: p1.y + lambda * (p2.y - p1.y) });
         }
     });
-
-    // Return point closest to p1 (source)
     if (points.length === 0) return null;
     return points.reduce((prev, curr) => getDistance(p1, prev) < getDistance(p1, curr) ? prev : curr);
 };
 
-// Ray-casting approach: Intersect ray from P1 (external) to P2 (center) with Element
 export const getIntersectingPoint = (element: ExcalidrawElement, fromPoint: Point): Point => {
     const { x, y, w, h, cx, cy } = getElementBounds(element);
     const center = { x: cx, y: cy };
-
     if (element.type === 'ellipse') {
-        // Ellipse Intersection
-        // x = cx + w/2 cos t, y = cy + h/2 sin t
         const angle = Math.atan2(fromPoint.y - cy, fromPoint.x - cx);
-        return {
-            x: cx + (w / 2) * Math.cos(angle),
-            y: cy + (h / 2) * Math.sin(angle)
-        };
+        return { x: cx + (w / 2) * Math.cos(angle), y: cy + (h / 2) * Math.sin(angle) };
     }
-
     if (element.type === 'diamond') {
-        const top = { x: cx, y: y };
-        const right = { x: x + w, y: cy };
-        const bottom = { x: cx, y: y + h };
-        const left = { x: x, y: cy };
-
-        // Treat diamond as 4 segments
-        // We want intersection of Line(From -> Center) with these 4 segments
+        const top = { x: cx, y: y }, right = { x: x + w, y: cy }, bottom = { x: cx, y: y + h }, left = { x: x, y: cy };
         const segments = [[top, right], [right, bottom], [bottom, left], [left, top]];
-
-        // Re-use logic: Intersection of Ray(From -> Center)
-        // Manual segment check
         for (const [a, b] of segments) {
             const det = (center.x - fromPoint.x) * (b.y - a.y) - (b.x - a.x) * (center.y - fromPoint.y);
             if (det === 0) continue;
             const lambda = ((b.y - a.y) * (b.x - fromPoint.x) + (a.x - b.x) * (b.y - fromPoint.y)) / det;
             const gamma = ((fromPoint.y - center.y) * (b.x - fromPoint.x) + (center.x - fromPoint.x) * (b.y - fromPoint.y)) / det;
             if (0 <= lambda && lambda <= 1 && 0 <= gamma && gamma <= 1) {
-                return {
-                    x: fromPoint.x + lambda * (center.x - fromPoint.x),
-                    y: fromPoint.y + lambda * (center.y - fromPoint.y)
-                };
+                return { x: fromPoint.x + lambda * (center.x - fromPoint.x), y: fromPoint.y + lambda * (center.y - fromPoint.y) };
             }
         }
         return center;
     }
-
-    // Default: Rectangle / Frame / Text
-    // Intersect (From -> Center) with Rect
     const rectInt = intersectLineRect(fromPoint, center, x, y, w, h);
-    return rectInt || center; // Fallback to center if inside (shouldn't happen usually)
+    return rectInt || center;
 };
 
 export const getDistance = (p1: Point, p2: Point) => {
@@ -107,628 +87,297 @@ const distanceToSegment = (p: Point, a: Point, b: Point) => {
     return getDistance(p, proj);
 };
 
-// Returns 'stroke', 'fill', or null
 export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stroke' | 'fill' | null => {
-    const { type, x: ex, y: ey, width, height, points, strokeWidth } = element;
+    const { type, x: ex, y: ey, width, height, points, strokeWidth, angle = 0 } = element;
     const threshold = Math.max(10, strokeWidth);
-
-    // Normalize bounds
-    const nx = width < 0 ? ex + width : ex;
-    const ny = height < 0 ? ey + height : ey;
-    const nw = Math.abs(width);
-    const nh = Math.abs(height);
-
-    // Linear elements: stroke only
+    let px = x, py = y;
+    if (angle !== 0) {
+        const center = { x: ex + width / 2, y: ey + height / 2 };
+        const rotated = rotatePoint({ x, y }, center, -angle);
+        px = rotated.x; py = rotated.y;
+    }
+    const nx = width < 0 ? ex + width : ex, ny = height < 0 ? ey + height : ey, nw = Math.abs(width), nh = Math.abs(height);
     if (type === 'arrow' || type === 'line' || type === 'freedraw') {
         if (!points || points.length < 2) return null;
-        const p = { x, y };
-        // Bounding box pre-check
-        if (x < nx - threshold || x > nx + nw + threshold || y < ny - threshold || y > ny + nh + threshold) {
-            return null;
-        }
+        if (x < nx - threshold || x > nx + nw + threshold || y < ny - threshold || y > ny + nh + threshold) return null;
         for (let i = 0; i < points.length - 1; i++) {
             const p1 = { x: element.x + points[i].x, y: element.y + points[i].y };
             const p2 = { x: element.x + points[i + 1].x, y: element.y + points[i + 1].y };
-            if (distanceToSegment(p, p1, p2) <= threshold) return 'stroke';
+            if (distanceToSegment({ x, y }, p1, p2) <= threshold) return 'stroke';
         }
         return null;
     }
-
-    // Shapes
-    // Check Stroke (Border)
-    let isStroke = false;
-    let isFill = false;
-
+    let isStroke = false, isFill = false;
     switch (type) {
-        case "rectangle":
-        case "frame": {
-            const nearLeft = Math.abs(x - nx) <= threshold && y >= ny - threshold && y <= ny + nh + threshold;
-            const nearRight = Math.abs(x - (nx + nw)) <= threshold && y >= ny - threshold && y <= ny + nh + threshold;
-            const nearTop = Math.abs(y - ny) <= threshold && x >= nx - threshold && x <= nx + nw + threshold;
-            const nearBottom = Math.abs(y - (ny + nh)) <= threshold && x >= nx - threshold && x <= nx + nw + threshold;
+        case "rectangle": case "frame": {
+            const nearLeft = Math.abs(px - nx) <= threshold && py >= ny - threshold && py <= ny + nh + threshold;
+            const nearRight = Math.abs(px - (nx + nw)) <= threshold && py >= ny - threshold && py <= ny + nh + threshold;
+            const nearTop = Math.abs(py - ny) <= threshold && px >= nx - threshold && px <= nx + nw + threshold;
+            const nearBottom = Math.abs(py - (ny + nh)) <= threshold && px >= nx - threshold && px <= nx + nw + threshold;
             isStroke = nearLeft || nearRight || nearTop || nearBottom;
-
-            // Frame Label Special Case
             if (!isStroke && type === 'frame') {
-                const labelText = element.name || "Frame";
-                const estWidth = labelText.length * 8 + 20;
-                const onLabel = x >= ex && x <= ex + estWidth && y >= ey - 24 && y <= ey;
+                const labelText = element.name || "Frame", estWidth = labelText.length * 8 + 20;
+                const onLabel = px >= ex && px <= ex + estWidth && py >= ey - 24 && py <= ey;
                 if (onLabel) isStroke = true;
             }
-
-            isFill = x >= nx && x <= nx + nw && y >= ny && y <= ny + nh;
+            isFill = px >= nx && px <= nx + nw && py >= ny && py <= ny + nh;
             break;
         }
         case "ellipse": {
-            const cx = ex + width / 2;
-            const cy = ey + height / 2;
-            const rx = Math.abs(width / 2);
-            const ry = Math.abs(height / 2);
-
-            const dx = x - cx;
-            const dy = y - cy;
+            const cx = ex + width / 2, cy = ey + height / 2, rx = Math.abs(width / 2), ry = Math.abs(height / 2), dx = px - cx, dy = py - cy;
             const normalizedDist = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
-
-            // Stroke: roughly between rx-threshold and rx+threshold
-            const rx_out = rx + threshold;
-            const ry_out = ry + threshold;
-            const rx_in = Math.max(0, rx - threshold);
-            const ry_in = Math.max(0, ry - threshold);
-
-            const inOuter = (dx * dx) / (rx_out * rx_out) + (dy * dy) / (ry_out * ry_out) <= 1;
-            const outInner = rx_in === 0 || ry_in === 0 || (dx * dx) / (rx_in * rx_in) + (dy * dy) / (ry_in * ry_in) >= 1;
-
-            isStroke = inOuter && outInner;
+            const rx_out = rx + threshold, ry_out = ry + threshold, rx_in = Math.max(0, rx - threshold), ry_in = Math.max(0, ry - threshold);
+            isStroke = ((dx * dx) / (rx_out * rx_out) + (dy * dy) / (ry_out * ry_out) <= 1) && (rx_in === 0 || ry_in === 0 || (dx * dx) / (rx_in * rx_in) + (dy * dy) / (ry_in * ry_in) >= 1);
             isFill = normalizedDist <= 1;
             break;
         }
         case "diamond": {
-            const cx = ex + width / 2;
-            const cy = ey + height / 2;
-            const w = Math.abs(width / 2);
-            const h = Math.abs(height / 2);
-
-            const top = { x: cx, y: ny };
-            const right = { x: nx + nw, y: cy };
-            const bottom = { x: cx, y: ny + nh };
-            const left = { x: nx, y: cy };
-            const p = { x, y };
-
-            isStroke = distanceToSegment(p, top, right) <= threshold ||
-                distanceToSegment(p, right, bottom) <= threshold ||
-                distanceToSegment(p, bottom, left) <= threshold ||
-                distanceToSegment(p, left, top) <= threshold;
-
-            isFill = (Math.abs(x - cx) / w) + (Math.abs(y - cy) / h) <= 1;
+            const cx = ex + width / 2, cy = ey + height / 2, w = Math.abs(width / 2), h = Math.abs(height / 2);
+            const top = { x: cx, y: ny }, right = { x: nx + nw, y: cy }, bottom = { x: cx, y: ny + nh }, left = { x: nx, y: cy };
+            isStroke = distanceToSegment({ x: px, y: py }, top, right) <= threshold || distanceToSegment({ x: px, y: py }, right, bottom) <= threshold || distanceToSegment({ x: px, y: py }, bottom, left) <= threshold || distanceToSegment({ x: px, y: py }, left, top) <= threshold;
+            isFill = (Math.abs(px - cx) / w) + (Math.abs(py - cy) / h) <= 1;
             break;
         }
-        case "text":
-        case "icon":
-            isFill = x >= nx && x <= nx + nw && y >= ny && y <= ny + nh;
-            // Text/Icon treated as solid for simplicity
-            return isFill ? 'fill' : null;
+        case "text": case "icon": isFill = px >= nx && px <= nx + nw && py >= ny && py <= ny + nh; return isFill ? 'fill' : null;
     }
+    return isStroke ? 'stroke' : isFill ? 'fill' : null;
+};
 
-    if (isStroke) return 'stroke';
-    if (isFill) return 'fill';
+export const getElementAtPosition = (x: number, y: number, elements: ExcalidrawElement[]) => {
+    for (let i = elements.length - 1; i >= 0; i--) {
+        const element = elements[i];
+        if (element.isLocked) continue;
+        const type = hitTest(x, y, element);
+
+        // Text and icon elements should always be selectable when hit, regardless of background
+        if ((element.type === 'text' || element.type === 'icon') && type === 'fill') return element;
+
+        // Other elements
+        if (type === 'stroke') return element;
+        if (type === 'fill' && element.backgroundColor !== 'transparent') return element;
+    }
     return null;
 };
 
-// Legacy support for other files if they use it (though getElementAtPosition is the main consumer)
-export const isPointNearElement = (x: number, y: number, element: ExcalidrawElement): boolean => {
-    const hit = hitTest(x, y, element);
-    if (!hit) return false;
-    if (hit === 'stroke') return true;
-    // For legacy check, assume transparent means no-hit unless solid
-    return element.backgroundColor !== 'transparent';
-};
-
-export const getElementAtPosition = (
-    x: number,
-    y: number,
-    elements: ExcalidrawElement[]
-): ExcalidrawElement | null => {
-    const hits: { element: ExcalidrawElement; type: 'stroke' | 'fill' }[] = [];
-
-    // Iterate in reverse to respect Z-index
-    for (let i = elements.length - 1; i >= 0; i--) {
-        const element = elements[i];
-        if (element.isLocked) continue; // Skip locked elements for selection
-        const type = hitTest(x, y, element);
-        if (type) {
-            hits.push({ element, type });
+export const getElementsWithinRect = (x: number, y: number, width: number, height: number, elements: ExcalidrawElement[]) => {
+    const rx = width < 0 ? x + width : x, ry = height < 0 ? y + height : y, rw = Math.abs(width), rh = Math.abs(height);
+    return elements.filter(el => {
+        let ex = el.x, ey = el.y, ew = el.width, eh = el.height;
+        if (el.points) {
+            const xs = el.points.map(p => p.x), ys = el.points.map(p => p.y);
+            ex = el.x + Math.min(...xs); ey = el.y + Math.min(...ys); ew = Math.max(...xs) - Math.min(...xs); eh = Math.max(...ys) - Math.min(...ys);
         }
-    }
-
-    if (hits.length === 0) return null;
-
-    // Priority 1: Stroke/Border hit (Always wins, top-most)
-    const strokeHit = hits.find(h => h.type === 'stroke');
-    if (strokeHit) return strokeHit.element;
-
-    // Priority 2: Non-Transparent Fill hit (Top-most)
-    const solidHit = hits.find(h => h.type === 'fill' && h.element.backgroundColor !== 'transparent');
-    if (solidHit) return solidHit.element;
-
-    // Priority 3: Transparent Fill hit
-    // Prefer non-frame elements (allow clicking through transparent frames)
-    const nonFrameHit = hits.find(h => h.element.type !== 'frame');
-    if (nonFrameHit) return nonFrameHit.element;
-
-    return hits[0].element;
-};
-
-export const getElementsWithinRect = (
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    elements: ExcalidrawElement[]
-): ExcalidrawElement[] => {
-    const rx = width < 0 ? x + width : x;
-    const ry = height < 0 ? y + height : y;
-    const rw = Math.abs(width);
-    const rh = Math.abs(height);
-
-    return elements.filter((element) => {
-        let ex = element.x;
-        let ey = element.y;
-        let ew = element.width;
-        let eh = element.height;
-
-        if (element.points) {
-            const xs = element.points.map(p => p.x);
-            const ys = element.points.map(p => p.y);
-            ex = element.x + Math.min(...xs);
-            ey = element.y + Math.min(...ys);
-            ew = Math.max(...xs) - Math.min(...xs);
-            eh = Math.max(...ys) - Math.min(...ys);
-        }
-
-        // Handle negative width/height elements
         if (ew < 0) { ex += ew; ew = Math.abs(ew); }
         if (eh < 0) { ey += eh; eh = Math.abs(eh); }
-
-        return (
-            rx < ex + ew &&
-            rx + rw > ex &&
-            ry < ey + eh &&
-            ry + rh > ey
-        );
+        return rx < ex + ew && rx + rw > ex && ry < ey + eh && ry + rh > ey;
     });
 };
 
 export const getSnapPoints = (element: ExcalidrawElement) => {
-    const { x, y, width, height } = element;
-    return [
+    const { x, y, width, height, angle = 0 } = element;
+    const center = { x: x + width / 2, y: y + height / 2 };
+    const points = [
         { x: x + width / 2, y: y, anchor: 'top' as AnchorPosition },
         { x: x + width, y: y + height / 2, anchor: 'right' as AnchorPosition },
         { x: x + width / 2, y: y + height, anchor: 'bottom' as AnchorPosition },
         { x: x, y: y + height / 2, anchor: 'left' as AnchorPosition },
     ];
+    return angle === 0 ? points : points.map(p => ({ ...rotatePoint(p, center, angle), anchor: p.anchor }));
 };
 
 export const getClosestSnapPoint = (x: number, y: number, element: ExcalidrawElement) => {
-    const snapPoints = getSnapPoints(element);
-    let closest = null;
-    let minDist = Infinity;
-
-    for (const point of snapPoints) {
-        const dist = getDistance({ x, y }, point);
-        if (dist < 20 && dist < minDist) {
-            minDist = dist;
-            closest = point;
-        }
+    const points = getSnapPoints(element);
+    let closest = null, minDist = Infinity;
+    for (const p of points) {
+        const d = getDistance({ x, y }, p);
+        if (d < 20 && d < minDist) { minDist = d; closest = p; }
     }
     return closest;
 };
 
 export const getAnchorPosition = (element: ExcalidrawElement, anchor: AnchorPosition): Point => {
-    const { x, y, width, height } = element;
+    const { x, y, width, height, angle = 0 } = element;
+    const center = { x: x + width / 2, y: y + height / 2 };
+    let p = { x: 0, y: 0 };
     switch (anchor) {
-        case 'top': return { x: x + width / 2, y: y };
-        case 'right': return { x: x + width, y: y + height / 2 };
-        case 'bottom': return { x: x + width / 2, y: y + height };
-        case 'left': return { x: x, y: y + height / 2 };
+        case 'top': p = { x: x + width / 2, y: y }; break;
+        case 'right': p = { x: x + width, y: y + height / 2 }; break;
+        case 'bottom': p = { x: x + width / 2, y: y + height }; break;
+        case 'left': p = { x: x, y: y + height / 2 }; break;
     }
+    return angle === 0 ? p : rotatePoint(p, center, angle);
 };
 
-const simplifyPoints = (points: Point[]): Point[] => {
-    if (points.length < 3) return points;
-    const newPoints = [points[0]];
-    for (let i = 1; i < points.length - 1; i++) {
-        const prev = newPoints[newPoints.length - 1];
-        const curr = points[i];
-        const next = points[i + 1];
-
-        if (Math.abs(prev.x - curr.x) < 0.5 && Math.abs(curr.x - next.x) < 0.5) continue;
-        if (Math.abs(prev.y - curr.y) < 0.5 && Math.abs(curr.y - next.y) < 0.5) continue;
-
-        newPoints.push(curr);
-    }
-    newPoints.push(points[points.length - 1]);
-    return newPoints;
-};
-
-type RectBounds = { x: number, y: number, width: number, height: number };
-
-export const getSmartAnchors = (
-    e1: ExcalidrawElement,
-    e2: ExcalidrawElement
-): { start: AnchorPosition; end: AnchorPosition } => {
-    const b1 = { cx: e1.x + e1.width / 2, cy: e1.y + e1.height / 2 };
-    const b2 = { cx: e2.x + e2.width / 2, cy: e2.y + e2.height / 2 };
-
-    const dx = b2.cx - b1.cx;
-    const dy = b2.cy - b1.cy;
-    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
-
-    if (angle >= -45 && angle <= 45) {
-        return { start: 'right', end: 'left' };
-    } else if (angle > 45 && angle < 135) {
-        return { start: 'bottom', end: 'top' };
-    } else if (angle >= 135 || angle <= -135) {
-        return { start: 'left', end: 'right' };
-    } else {
-        return { start: 'top', end: 'bottom' };
-    }
-};
-
-export const generateOrthogonalPoints = (
-    start: Point,
-    end: Point,
-    startAnchor: AnchorPosition,
-    endAnchor: AnchorPosition,
-    b1: RectBounds,
-    b2: RectBounds,
-    padding: number = 20
-): Point[] => {
-    const absPoints: Point[] = [start];
-
-    const breakout = (p: Point, anchor: AnchorPosition, pad: number): Point => {
-        switch (anchor) {
-            case 'top': return { x: p.x, y: p.y - pad };
-            case 'bottom': return { x: p.x, y: p.y + pad };
-            case 'left': return { x: p.x - pad, y: p.y };
-            case 'right': return { x: p.x + pad, y: p.y };
-        }
-    };
-
-    const pStart = breakout(start, startAnchor, padding);
-    const pEnd = breakout(end, endAnchor, padding);
-
-    absPoints.push(pStart);
-
-    const isVerticalStart = startAnchor === 'top' || startAnchor === 'bottom';
-    const isVerticalEnd = endAnchor === 'top' || endAnchor === 'bottom';
-
-    if (isVerticalStart === isVerticalEnd) {
-        if (startAnchor !== endAnchor) {
-            if (isVerticalStart) {
-                const midY = (pStart.y + pEnd.y) / 2;
-                absPoints.push({ x: pStart.x, y: midY });
-                absPoints.push({ x: pEnd.x, y: midY });
-            } else {
-                const midX = (pStart.x + pEnd.x) / 2;
-                absPoints.push({ x: midX, y: pStart.y });
-                absPoints.push({ x: midX, y: pEnd.y });
-            }
-        } else {
-            if (isVerticalStart) {
-                const extremY = startAnchor === 'top'
-                    ? Math.min(pStart.y, pEnd.y)
-                    : Math.max(pStart.y, pEnd.y);
-                absPoints.push({ x: pStart.x, y: extremY });
-                absPoints.push({ x: pEnd.x, y: extremY });
-            } else {
-                const extremX = startAnchor === 'left'
-                    ? Math.min(pStart.x, pEnd.x)
-                    : Math.max(pStart.x, pEnd.x);
-                absPoints.push({ x: extremX, y: pStart.y });
-                absPoints.push({ x: extremX, y: pEnd.y });
-            }
-        }
-    } else {
-        let corner: Point;
-        if (isVerticalStart) {
-            corner = { x: pEnd.x, y: pStart.y };
-        } else {
-            corner = { x: pStart.x, y: pEnd.y };
-        }
-
-        const validStartDir = isVerticalStart
-            ? (startAnchor === 'bottom' ? corner.y >= pStart.y : corner.y <= pStart.y)
-            : (startAnchor === 'right' ? corner.x >= pStart.x : corner.x <= pStart.x);
-
-        const validEndDir = isVerticalEnd
-            ? (endAnchor === 'bottom' ? corner.y >= pEnd.y : corner.y <= pEnd.y)
-            : (endAnchor === 'right' ? corner.x >= pEnd.x : corner.x <= pEnd.x);
-
-        if (validStartDir && validEndDir) {
-            absPoints.push(corner);
-        } else {
-            if (isVerticalStart) {
-                absPoints.push({ x: pStart.x, y: (pStart.y + pEnd.y) / 2 });
-                absPoints.push({ x: pEnd.x, y: (pStart.y + pEnd.y) / 2 });
-            } else {
-                absPoints.push({ x: (pStart.x + pEnd.x) / 2, y: pStart.y });
-                absPoints.push({ x: (pStart.x + pEnd.x) / 2, y: pEnd.y });
-            }
-        }
-    }
-
-    absPoints.push(pEnd);
-    absPoints.push(end);
-
-    const simplified = simplifyPoints(absPoints);
-    return simplified.map(p => ({ x: p.x - start.x, y: p.y - start.y }));
-};
-
-export const getResizeHandles = (element: ExcalidrawElement): Record<string, Point> => {
-    const { x, y, width, height, type, points } = element;
+export const getResizeHandles = (element: ExcalidrawElement, zoom: number = 1): Record<string, Point> => {
+    const { x, y, width, height, type, points, angle = 0 } = element;
+    const center = { x: x + width / 2, y: y + height / 2 };
+    const padding = 8 / zoom;
 
     if ((type === 'line' || type === 'arrow') && points) {
         const handles: Record<string, Point> = {};
-        points.forEach((p, i) => {
-            handles[`p:${i}`] = { x: x + p.x, y: y + p.y };
-        });
-
+        points.forEach((p, i) => handles[`p:${i}`] = { x: x + p.x, y: y + p.y });
         for (let i = 0; i < points.length - 1; i++) {
-            const p1 = points[i];
-            const p2 = points[i + 1];
-            handles[`m:${i}`] = {
-                x: x + (p1.x + p2.x) / 2,
-                y: y + (p1.y + p2.y) / 2
-            };
+            handles[`m:${i}`] = { x: x + (points[i].x + points[i + 1].x) / 2, y: y + (points[i].y + points[i + 1].y) / 2 };
         }
         return handles;
     }
 
-    if (type === 'text' || type === 'icon') {
-        return {
-            nw: { x, y },
-            ne: { x: x + width, y },
-            se: { x: x + width, y: y + height },
-            sw: { x, y: y + height },
-            e: { x: x + width, y: y + height / 2 },
-            w: { x, y: y + height / 2 },
-        };
-    }
+    const nx = x - padding;
+    const ny = y - padding;
+    const nw = width + padding * 2;
+    const nh = height + padding * 2;
 
-    return {
-        nw: { x, y },
-        n: { x: x + width / 2, y },
-        ne: { x: x + width, y },
-        e: { x: x + width, y: y + height / 2 },
-        se: { x: x + width, y: y + height },
-        s: { x: x + width / 2, y: y + height },
-        sw: { x, y: y + height },
-        w: { x, y: y + height / 2 },
+    const local = {
+        nw: { x: nx, y: ny },
+        n: { x: nx + nw / 2, y: ny },
+        ne: { x: nx + nw, y: ny },
+        e: { x: nx + nw, y: ny + nh / 2 },
+        se: { x: nx + nw, y: ny + nh },
+        s: { x: nx + nw / 2, y: ny + nh },
+        sw: { x: nx, y: ny + nh },
+        w: { x: nx, y: ny + nh / 2 },
+        rotation: { x: nx + nw / 2, y: ny - 32 / zoom }
     };
+
+    if (angle === 0) return local;
+    const global: Record<string, Point> = {};
+    for (const [k, p] of Object.entries(local)) {
+        global[k] = rotatePoint(p, center, angle);
+    }
+    return global;
 };
 
 export const getResizeHandleAtPosition = (x: number, y: number, element: ExcalidrawElement, zoom: number): ResizeHandle | null => {
-    const handles = getResizeHandles(element);
-    const threshold = 10 / zoom;
-
-    for (const [key, pos] of Object.entries(handles)) {
-        if (getDistance({ x, y }, pos as Point) < threshold) {
-            return key as ResizeHandle;
-        }
-    }
+    const handles = getResizeHandles(element, zoom);
+    const threshold = 12 / zoom;
+    for (const [k, pos] of Object.entries(handles)) if (getDistance({ x, y }, pos) < threshold) return k as ResizeHandle;
     return null;
 };
 
 export const getConnectorHandles = (element: ExcalidrawElement, zoom: number): Record<string, Point> => {
-    const { x, y, width, height, type } = element;
-    if (type === 'line' || type === 'arrow' || type === 'freedraw') return {};
-
-    // Offset for the connector handles (outside the resize handles)
+    const { x, y, width, height, angle = 0 } = element;
+    const center = { x: x + width / 2, y: y + height / 2 };
     const offset = 24 / zoom;
-
-    return {
-        n: { x: x + width / 2, y: y - offset },
-        e: { x: x + width + offset, y: y + height / 2 },
-        s: { x: x + width / 2, y: y + height + offset },
-        w: { x: x - offset, y: y + height / 2 },
-    };
+    const local = { n: { x: x + width / 2, y: y - offset }, e: { x: x + width + offset, y: y + height / 2 }, s: { x: x + width / 2, y: y + height + offset }, w: { x: x - offset, y: y + height / 2 } };
+    if (angle === 0) return local;
+    const global: Record<string, Point> = {};
+    for (const [k, p] of Object.entries(local)) global[k] = rotatePoint(p, center, angle);
+    return global;
 };
 
 export const getConnectorHandleAtPosition = (x: number, y: number, element: ExcalidrawElement, zoom: number): ResizeHandle | null => {
     const handles = getConnectorHandles(element, zoom);
-    const threshold = 12 / zoom; // Slightly larger hit area
-
-    for (const [key, pos] of Object.entries(handles)) {
-        if (getDistance({ x, y }, pos as Point) < threshold) {
-            return key as ResizeHandle;
-        }
-    }
+    for (const [k, p] of Object.entries(handles)) if (getDistance({ x, y }, p) < 14 / zoom) return k as ResizeHandle;
     return null;
 };
 
-export const getCursorForHandle = (handle: ResizeHandle): string => {
-    if (typeof handle === 'string' && (handle.startsWith('p:') || handle.startsWith('m:'))) {
-        return 'move';
-    }
-
+export const getCursorForHandle = (handle: ResizeHandle) => {
+    if (typeof handle === 'string' && (handle.startsWith('p:') || handle.startsWith('m:'))) return 'move';
+    if (handle === 'rotation') return 'crosshair';
     switch (handle) {
-        case 'n':
-        case 's': return 'ns-resize';
-        case 'w':
-        case 'e': return 'ew-resize';
-        case 'nw':
-        case 'se': return 'nwse-resize';
-        case 'ne':
-        case 'sw': return 'nesw-resize';
+        case 'n': case 's': return 'ns-resize';
+        case 'w': case 'e': return 'ew-resize';
+        case 'nw': case 'se': return 'nwse-resize';
+        case 'ne': case 'sw': return 'nesw-resize';
         default: return 'default';
     }
 };
 
-const normalizeElement = (element: ExcalidrawElement): Partial<ExcalidrawElement> => {
-    if (element.points) {
-        const minX = Math.min(...element.points.map(p => p.x));
-        const minY = Math.min(...element.points.map(p => p.y));
-        const maxX = Math.max(...element.points.map(p => p.x));
-        const maxY = Math.max(...element.points.map(p => p.y));
+export const getSmartAnchors = (e1: ExcalidrawElement, e2: ExcalidrawElement): { start: AnchorPosition; end: AnchorPosition } => {
+    const b1 = { cx: e1.x + e1.width / 2, cy: e1.y + e1.height / 2 }, b2 = { cx: e2.x + e2.width / 2, cy: e2.y + e2.height / 2 };
+    const dx = b2.cx - b1.cx, dy = b2.cy - b1.cy, angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    if (angle >= -45 && angle <= 45) return { start: 'right', end: 'left' };
+    if (angle > 45 && angle < 135) return { start: 'bottom', end: 'top' };
+    if (angle >= 135 || angle <= -135) return { start: 'left', end: 'right' };
+    return { start: 'top', end: 'bottom' };
+};
 
-        const newPoints = element.points.map(p => ({ x: p.x - minX, y: p.y - minY }));
+const simplifyPoints = (pts: Point[]) => {
+    if (pts.length < 3) return pts;
+    const res = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+        const p = res[res.length - 1], c = pts[i], n = pts[i + 1];
+        if (Math.abs(p.x - c.x) < 0.5 && Math.abs(c.x - n.x) < 0.5) continue;
+        if (Math.abs(p.y - c.y) < 0.5 && Math.abs(c.y - n.y) < 0.5) continue;
+        res.push(c);
+    }
+    res.push(pts[pts.length - 1]);
+    return res;
+};
 
-        return {
-            x: element.x + minX,
-            y: element.y + minY,
-            width: maxX - minX,
-            height: maxY - minY,
-            points: newPoints
-        };
+export const generateOrthogonalPoints = (start: Point, end: Point, sa: AnchorPosition, ea: AnchorPosition, b1: any, b2: any, pad: number = 20): Point[] => {
+    const breakout = (p: Point, a: AnchorPosition, pd: number) => {
+        switch (a) { case 'top': return { x: p.x, y: p.y - pd }; case 'bottom': return { x: p.x, y: p.y + pd }; case 'left': return { x: p.x - pd, y: p.y }; case 'right': return { x: p.x + pd, y: p.y }; default: return p; }
+    };
+    const p1 = breakout(start, sa, pad), p2 = breakout(end, ea, pad), res = [start, p1];
+    const isV1 = sa === 'top' || sa === 'bottom', isV2 = ea === 'top' || ea === 'bottom';
+    if (isV1 === isV2) {
+        if (sa !== ea) { if (isV1) { res.push({ x: p1.x, y: (p1.y + p2.y) / 2 }, { x: p2.x, y: (p1.y + p2.y) / 2 }); } else { res.push({ x: (p1.x + p2.x) / 2, y: p1.y }, { x: (p1.x + p2.x) / 2, y: p2.y }); } }
+        else { if (isV1) { const ey = sa === 'top' ? Math.min(p1.y, p2.y) : Math.max(p1.y, p2.y); res.push({ x: p1.x, y: ey }, { x: p2.x, y: ey }); } else { const ex = sa === 'left' ? Math.min(p1.x, p2.x) : Math.max(p1.x, p2.x); res.push({ x: ex, y: p1.y }, { x: ex, y: p2.y }); } }
+    } else {
+        const c = isV1 ? { x: p2.x, y: p1.y } : { x: p1.x, y: p2.y };
+        const v1 = isV1 ? (sa === 'bottom' ? c.y >= p1.y : c.y <= p1.y) : (sa === 'right' ? c.x >= p1.x : c.x <= p1.x);
+        const v2 = isV2 ? (ea === 'bottom' ? c.y >= p2.y : c.y <= p2.y) : (ea === 'right' ? c.x >= p2.x : c.x <= p2.x);
+        if (v1 && v2) res.push(c);
+        else { if (isV1) res.push({ x: p1.x, y: (p1.y + p2.y) / 2 }, { x: p2.x, y: (p1.y + p2.y) / 2 }); else res.push({ x: (p1.x + p2.x) / 2, y: p1.y }, { x: (p1.x + p2.x) / 2, y: p2.y }); }
     }
+    res.push(p2, end);
+    return simplifyPoints(res).map(p => ({ x: p.x - start.x, y: p.y - start.y }));
+};
 
-    let { x, y, width, height } = element;
-    if (width < 0) {
-        x += width;
-        width = Math.abs(width);
+const normalizeElement = (el: ExcalidrawElement): Partial<ExcalidrawElement> => {
+    if (el.points) {
+        const xs = el.points.map(p => p.x), ys = el.points.map(p => p.y), mx = Math.min(...xs), my = Math.min(...ys);
+        return { x: el.x + mx, y: el.y + my, width: Math.max(...xs) - mx, height: Math.max(...ys) - my, points: el.points.map(p => ({ x: p.x - mx, y: p.y - my })) };
     }
-    if (height < 0) {
-        y += height;
-        height = Math.abs(height);
-    }
+    let { x, y, width, height } = el;
+    if (width < 0) { x += width; width = Math.abs(width); }
+    if (height < 0) { y += height; height = Math.abs(height); }
     return { x, y, width, height };
 };
 
-export const resizeElement = (
-    handle: ResizeHandle,
-    element: ExcalidrawElement,
-    newPos: Point,
-    keepAspectRatio: boolean = false
-): Partial<ExcalidrawElement> => {
-
-    if (element.type === 'text' || element.type === 'icon') {
-        keepAspectRatio = true;
+export const resizeElement = (h: ResizeHandle, el: ExcalidrawElement, pos: Point, keep: boolean = false): Partial<ExcalidrawElement> => {
+    if (h === 'rotation') { const c = { x: el.x + el.width / 2, y: el.y + el.height / 2 }; return { angle: Math.atan2(pos.y - c.y, pos.x - c.x) + Math.PI / 2 }; }
+    if (el.type === 'line' || el.type === 'arrow') {
+        if (!el.points) return {};
+        const pts = [...el.points];
+        if (typeof h === 'string' && h.startsWith('p:')) { const i = parseInt(h.split(':')[1]); if (!isNaN(i)) pts[i] = { x: pos.x - el.x, y: pos.y - el.y }; }
+        return normalizeElement({ ...el, points: pts });
     }
-
-    if (element.type === 'line' || element.type === 'arrow') {
-        if (!element.points) return {};
-
-        const newPoints = [...element.points];
-
-        if (typeof handle === 'string' && handle.startsWith('p:')) {
-            const index = parseInt(handle.split(':')[1]);
-            if (!isNaN(index) && index >= 0 && index < newPoints.length) {
-                newPoints[index] = {
-                    x: newPos.x - element.x,
-                    y: newPos.y - element.y
-                };
-            }
-        }
-
-        return normalizeElement({ ...element, points: newPoints });
+    let lp = pos;
+    if (el.angle) lp = rotatePoint(pos, { x: el.x + el.width / 2, y: el.y + el.height / 2 }, -el.angle);
+    let { x, y, width, height } = el, nx = x, ny = y, nw = width, nh = height;
+    switch (h) {
+        case 'nw': nx = lp.x; ny = lp.y; nw = x + width - lp.x; nh = y + height - lp.y; break;
+        case 'n': ny = lp.y; nh = y + height - lp.y; break;
+        case 'ne': ny = lp.y; nw = lp.x - x; nh = y + height - lp.y; break;
+        case 'e': nw = lp.x - x; break;
+        case 'se': nw = lp.x - x; nh = lp.y - y; break;
+        case 's': nh = lp.y - y; break;
+        case 'sw': nx = lp.x; nw = x + width - lp.x; nh = lp.y - y; break;
+        case 'w': nx = lp.x; nw = x + width - lp.x; break;
     }
-
-    const { x, y, width, height } = element;
-    let nx = x;
-    let ny = y;
-    let nw = width;
-    let nh = height;
-
-    switch (handle) {
-        case 'nw':
-            nx = newPos.x;
-            ny = newPos.y;
-            nw = x + width - newPos.x;
-            nh = y + height - newPos.y;
-            break;
-        case 'n':
-            ny = newPos.y;
-            nh = y + height - newPos.y;
-            break;
-        case 'ne':
-            ny = newPos.y;
-            nw = newPos.x - x;
-            nh = y + height - newPos.y;
-            break;
-        case 'e':
-            nw = newPos.x - x;
-            break;
-        case 'se':
-            nw = newPos.x - x;
-            nh = newPos.y - y;
-            break;
-        case 's':
-            nh = newPos.y - y;
-            break;
-        case 'sw':
-            nx = newPos.x;
-            nw = x + width - newPos.x;
-            nh = newPos.y - y;
-            break;
-        case 'w':
-            nx = newPos.x;
-            nw = x + width - newPos.x;
-            break;
-    }
-
-    if (element.type === 'text') {
-        // Special logic for Text Resizing
-        // If resizing from E or W, update width for text wrapping, do not scale font.
-        // If resizing from corners, scale font (existing logic).
-
-        if (handle === 'e' || handle === 'w') {
-            // Just update the width for wrapping
-            const res = normalizeElement({ ...element, x: nx, y: ny, width: nw, height: nh });
-            // Height will be auto-calculated by render/measure based on wrapping, but we store the box width
-            // Recalculate height based on new width using measureText
-            const metrics = measureText(element.text || "", element.fontSize || 20, element.fontFamily || 1, element.fontWeight, element.fontStyle, res.width);
-            return { ...res, height: metrics.height };
+    if (el.type === 'text') {
+        if (h === 'e' || h === 'w') {
+            const res = normalizeElement({ ...el, x: nx, y: ny, width: nw, height: nh });
+            const m = measureText(el.text || "", el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle, res.width);
+            return { ...res, height: m.height };
         } else {
-            // Standard font scaling for corners
-            const absWidth = Math.abs(width);
-            const absHeight = Math.abs(height);
-            const ratio = absWidth / absHeight;
-
-            if (['nw', 'ne', 'sw', 'se'].includes(handle)) {
-                const newH = Math.abs(nh);
-                const newW = newH * ratio;
-
-                nw = nw < 0 ? -newW : newW;
-                nh = nh < 0 ? -newH : newH;
-
-                if (handle.includes('w')) {
-                    nx = x + width - nw;
-                }
-                if (handle.includes('n')) {
-                    ny = y + height - nh;
-                }
+            const r = Math.abs(width) / Math.abs(height);
+            if (['nw', 'ne', 'sw', 'se'].includes(h)) {
+                const nH = Math.abs(nh), nW = nH * r; nw = nw < 0 ? -nW : nW; nh = nh < 0 ? -nH : nH;
+                if (h.includes('w')) nx = x + width - nw; if (h.includes('n')) ny = y + height - nh;
             }
-
-            const res = normalizeElement({ ...element, x: nx, y: ny, width: nw, height: nh });
-            const scale = Math.abs(res.height!) / element.height;
-            const currentFontSize = element.fontSize || 20;
-            const newFontSize = Math.max(8, currentFontSize * scale);
-
-            return { ...res, fontSize: newFontSize };
+            const res = normalizeElement({ ...el, x: nx, y: ny, width: nw, height: nh });
+            return { ...res, fontSize: Math.max(8, (el.fontSize || 20) * (Math.abs(res.height!) / el.height)) };
         }
     }
-
-    if (keepAspectRatio) {
-        const absWidth = Math.abs(width);
-        const absHeight = Math.abs(height);
-        const ratio = absWidth / absHeight;
-
-        if (['nw', 'ne', 'sw', 'se'].includes(handle)) {
-            const newH = Math.abs(nh);
-            const newW = newH * ratio;
-
-            nw = nw < 0 ? -newW : newW;
-            nh = nh < 0 ? -newH : newH;
-
-            if (handle.includes('w')) {
-                nx = x + width - nw;
-            }
-            if (handle.includes('n')) {
-                ny = y + height - nh;
-            }
+    if (keep || el.type === 'icon') {
+        const r = Math.abs(width) / Math.abs(height);
+        if (['nw', 'ne', 'sw', 'se'].includes(h)) {
+            const nH = Math.abs(nh), nW = nH * r; nw = nw < 0 ? -nW : nW; nh = nh < 0 ? -nH : nH;
+            if (h.includes('w')) nx = x + width - nw; if (h.includes('n')) ny = y + height - nh;
         }
     }
-
-    const res = normalizeElement({ ...element, x: nx, y: ny, width: nw, height: nh });
-    return res;
+    return normalizeElement({ ...el, x: nx, y: ny, width: nw, height: nh });
 };

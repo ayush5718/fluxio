@@ -58,8 +58,8 @@ const Toolbar: React.FC<ToolbarProps> = React.memo(({ activeTool, onSelectTool, 
           onClick={() => onSelectTool(tool.id)}
           title={`${tool.label} (${tool.shortcut})`}
           className={`p-2.5 rounded-xl transition-all duration-200 ${activeTool === tool.id
-              ? "bg-violet-500 text-white shadow-lg shadow-violet-500/30 scale-105"
-              : "text-gray-600 dark:text-gray-300 hover:bg-white/40 dark:hover:bg-white/10 hover:scale-105"
+            ? "bg-brand text-white shadow-lg shadow-brand/30 scale-105"
+            : "text-gray-600 dark:text-gray-300 hover:bg-white/40 dark:hover:bg-white/10 hover:scale-105"
             }`}
         >
           {getIcon(tool.id)}

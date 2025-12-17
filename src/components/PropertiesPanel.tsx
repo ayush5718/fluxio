@@ -77,7 +77,7 @@ const IconButton: React.FC<{ onClick: () => void; icon: React.ElementType; title
       <button onClick={onClick} disabled={disabled}
         className={`p-2 rounded-lg transition-all duration-150 flex items-center justify-center
         ${disabled ? 'opacity-30 cursor-not-allowed' :
-            active ? 'bg-violet-600 text-white shadow-sm' :
+            active ? 'bg-brand text-white shadow-sm' :
               'bg-gray-100 dark:bg-gray-800/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'}`}
       >
         <Icon size={16} strokeWidth={2} />
@@ -89,7 +89,7 @@ const ColorSwatch: React.FC<{ color: string; isSelected: boolean; onClick: () =>
   <button
     onClick={onClick}
     className={`w-6 h-6 rounded-[6px] transition-transform hover:scale-110 focus:outline-none relative
-      ${isSelected ? 'ring-2 ring-violet-500 ring-offset-2 ring-offset-[#1e1e1e] z-10 scale-105' : 'hover:ring-1 hover:ring-white/20'}
+      ${isSelected ? 'ring-2 ring-brand ring-offset-2 ring-offset-[#1e1e1e] z-10 scale-105' : 'hover:ring-1 hover:ring-white/20'}
       ${isTransparent ? 'bg-white/10 flex items-center justify-center' : ''}
     `}
     style={!isTransparent ? { backgroundColor: color } : {}}
@@ -110,7 +110,7 @@ const RangeSlider: React.FC<{ label: string; value: number; min: number; max: nu
         max={max}
         value={value}
         onChange={(e) => onChange(parseInt(e.target.value))}
-        className="w-full h-1 bg-gray-700 rounded-full appearance-none cursor-pointer accent-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+        className="w-full h-1 bg-gray-700 rounded-full appearance-none cursor-pointer accent-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
       />
     </div>
     <span className="text-[10px] text-gray-500 w-6 text-right font-mono">{value}</span>
@@ -185,7 +185,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
       ref={panelRef}
       onMouseDown={startDrag}
       style={{ left: position.x, top: position.y }}
-      className={`fixed z-50 w-[280px] flex flex-col bg-white/80 dark:bg-[#1e1e1e]/90 border border-white/20 dark:border-gray-800 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] dark:shadow-2xl backdrop-blur-xl overflow-hidden select-none transition-shadow ${isDragging ? 'shadow-violet-500/10 cursor-grabbing' : ''}`}
+      className={`fixed z-50 w-[280px] flex flex-col bg-white/80 dark:bg-[#1e1e1e]/90 border border-white/20 dark:border-gray-800 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] dark:shadow-2xl backdrop-blur-xl overflow-hidden select-none transition-shadow ${isDragging ? 'shadow-brand/10 cursor-grabbing' : ''}`}
     >
       {/* Header / Drag Handle */}
       <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 drag-handle cursor-grab active:cursor-grabbing bg-transparent">
@@ -199,6 +199,62 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
 
       {/* Main Content */}
       <div className="p-5 flex flex-col gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar bg-transparent">
+
+        {/* Precise Transformation */}
+        {firstSelectedElement && !hasMultipleSelection && (
+          <div className="bg-gray-50/50 dark:bg-gray-800/30 p-3 rounded-xl border border-gray-100 dark:border-gray-800 flex flex-col gap-3">
+            <SectionLabel>Transformation</SectionLabel>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400 font-medium ml-1">X Pos</span>
+                <input
+                  type="number"
+                  value={Math.round(firstSelectedElement.x)}
+                  onChange={(e) => handleUpdate({ x: parseInt(e.target.value) || 0 })}
+                  className="bg-white/50 dark:bg-black/50 border border-gray-100 dark:border-gray-800 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-brand outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400 font-medium ml-1">Y Pos</span>
+                <input
+                  type="number"
+                  value={Math.round(firstSelectedElement.y)}
+                  onChange={(e) => handleUpdate({ y: parseInt(e.target.value) || 0 })}
+                  className="bg-white/50 dark:bg-black/50 border border-gray-100 dark:border-gray-800 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-brand outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400 font-medium ml-1">Width</span>
+                <input
+                  type="number"
+                  value={Math.round(firstSelectedElement.width)}
+                  onChange={(e) => handleUpdate({ width: parseInt(e.target.value) || 0 })}
+                  className="bg-white/50 dark:bg-black/50 border border-gray-100 dark:border-gray-800 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-brand outline-none"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400 font-medium ml-1">Height</span>
+                <input
+                  type="number"
+                  value={Math.round(firstSelectedElement.height)}
+                  onChange={(e) => handleUpdate({ height: parseInt(e.target.value) || 0 })}
+                  className="bg-white/50 dark:bg-black/50 border border-gray-100 dark:border-gray-800 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-brand outline-none"
+                />
+              </div>
+            </div>
+            {firstSelectedElement.type !== 'line' && firstSelectedElement.type !== 'arrow' && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400 font-medium ml-1">Rotation (deg)</span>
+                <input
+                  type="number"
+                  value={Math.round((firstSelectedElement.angle || 0) * (180 / Math.PI))}
+                  onChange={(e) => handleUpdate({ angle: (parseInt(e.target.value) || 0) * (Math.PI / 180) })}
+                  className="bg-white/50 dark:bg-black/50 border border-gray-100 dark:border-gray-800 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:ring-1 focus:ring-brand outline-none w-full"
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Colors */}
         <div>
@@ -227,13 +283,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         <div>
           <SectionLabel>Stroke Style</SectionLabel>
           <div className="flex gap-2 p-1 bg-gray-50/50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
-            <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'solid' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'solid' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <Minus size={18} />
             </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dashed' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dashed' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <MoreHorizontal size={18} />
             </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dotted' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dotted' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <div className="flex gap-0.5"><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /></div>
             </button>
           </div>
@@ -243,17 +299,28 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         <div>
           <SectionLabel>Fill Style</SectionLabel>
           <div className="flex gap-2 p-1 bg-gray-50/50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
-            <button onClick={() => handleUpdate({ fillStyle: 'hachure' })} title="Hachure" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'hachure' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ fillStyle: 'hachure' })} title="Hachure" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'hachure' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <Hash size={18} />
             </button>
-            <button onClick={() => handleUpdate({ fillStyle: 'cross-hatch' })} title="Cross-Hatch" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'cross-hatch' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ fillStyle: 'cross-hatch' })} title="Cross-Hatch" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'cross-hatch' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <Grid3x3 size={18} />
             </button>
-            <button onClick={() => handleUpdate({ fillStyle: 'solid' })} title="Solid" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'solid' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ fillStyle: 'solid' })} title="Solid" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'solid' ? 'bg-brand/20 text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <Square size={18} fill="currentColor" />
             </button>
           </div>
         </div>
+
+        {/* Roundness (Only for Rectangles) */}
+        {hasSelection && !hasMultipleSelection && firstSelectedElement?.type === 'rectangle' && (
+          <div>
+            <SectionLabel>Edges</SectionLabel>
+            <div className="flex gap-2 p-1 bg-gray-50/50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
+              <button onClick={() => handleUpdate({ roundness: 0 })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center text-[10px] font-bold uppercase tracking-wider ${(!firstSelectedElement.roundness || firstSelectedElement.roundness === 0) ? 'bg-brand/20 text-brand dark:text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>Sharp</button>
+              <button onClick={() => handleUpdate({ roundness: 12 })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center text-[10px] font-bold uppercase tracking-wider ${firstSelectedElement.roundness === 12 ? 'bg-brand/20 text-brand dark:text-brand ring-1 ring-brand/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>Round</button>
+            </div>
+          </div>
+        )}
 
         {/* Text Selection */}
         {isTextSelected && (
@@ -261,9 +328,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
             <SectionLabel>Typography</SectionLabel>
             <div className="flex flex-col gap-2 p-3 bg-gray-50/50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800">
               <div className="flex gap-1 justify-between">
-                <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 1 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Draw</button>
-                <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 2 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Sans</button>
-                <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 3 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Mono</button>
+                <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 1 ? 'bg-brand text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Draw</button>
+                <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 2 ? 'bg-brand text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Sans</button>
+                <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 3 ? 'bg-brand text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Mono</button>
               </div>
               <div className="grid grid-cols-4 gap-1 mt-1">
                 {[16, 20, 28, 36].map(s => (

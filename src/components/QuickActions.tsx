@@ -137,12 +137,12 @@ const QuickActions: React.FC<QuickActionsProps> = ({ isOpen, onClose, onSelectTo
                 onClick={() => handleSelect(action)}
                 className={`w-full flex items-center justify-between px-3 py-3 rounded-lg text-left transition-colors
                   ${index === selectedIndex
-                    ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-900 dark:text-violet-100'
+                    ? 'bg-brand/10 text-brand'
                     : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}
                 `}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-md ${index === selectedIndex ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
+                  <div className={`p-2 rounded-md ${index === selectedIndex ? 'bg-brand/20 text-brand' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
                     <action.icon size={18} />
                   </div>
                   <div className="flex flex-col">

@@ -35,12 +35,12 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[150] flex items-center justify-center p-4" onClick={onClose}>
-      <div 
+      <div
         className="bg-white dark:bg-gray-900 w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700 animate-in fade-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50">
-          <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
+          <div className="flex items-center gap-2 text-brand">
             <Keyboard size={20} />
             <h2 className="font-bold text-lg">Keyboard Shortcuts</h2>
           </div>
@@ -50,8 +50,8 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ isOpen, onClose }) => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-white dark:bg-[#121212]">
-          <ShortcutSection 
-            title="Tools" 
+          <ShortcutSection
+            title="Tools"
             shortcuts={[
               { label: 'Selection', keys: ['1', 'V'], icon: MousePointer2 },
               { label: 'Rectangle', keys: ['2', 'R'], icon: Square },
@@ -67,8 +67,8 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ isOpen, onClose }) => {
             ]}
           />
 
-          <ShortcutSection 
-            title="Editor" 
+          <ShortcutSection
+            title="Editor"
             shortcuts={[
               { label: 'Undo', keys: ['Ctrl', 'Z'] },
               { label: 'Redo', keys: ['Ctrl', 'Shift', 'Z'] },
@@ -81,16 +81,20 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ isOpen, onClose }) => {
               { label: 'Group', keys: ['Ctrl', 'G'] },
               { label: 'Ungroup', keys: ['Ctrl', 'Shift', 'G'] },
               { label: 'Lock/Unlock', keys: ['Ctrl', 'Shift', 'L'] },
-              { label: 'Bring to Front', keys: [']'] },
-              { label: 'Send to Back', keys: ['['] },
+              { label: 'Bring Forward', keys: ['Ctrl', ']'] },
+              { label: 'Send Backward', keys: ['Ctrl', '['] },
+              { label: 'Bring to Front', keys: ['Ctrl', 'Shift', ']'] },
+              { label: 'Send to Back', keys: ['Ctrl', 'Shift', '['] },
             ]}
           />
 
-          <ShortcutSection 
-            title="View & System" 
+          <ShortcutSection
+            title="View & System"
             shortcuts={[
               { label: 'Zoom In', keys: ['Ctrl', '+'] },
               { label: 'Zoom Out', keys: ['Ctrl', '-'] },
+              { label: 'Reset Zoom', keys: ['Ctrl', '0'] },
+              { label: 'Toggle Grid', keys: ['G'] },
               { label: 'Quick Actions', keys: ['Ctrl', 'K'] },
               { label: 'Help', keys: ['?'] },
               { label: 'Pan Canvas', keys: ['Space + Drag'] },
@@ -98,9 +102,9 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ isOpen, onClose }) => {
             ]}
           />
         </div>
-        
+
         <div className="px-6 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 text-xs text-center text-gray-500 dark:text-gray-400">
-            Press <kbd className="font-mono bg-gray-200 dark:bg-gray-700 px-1 rounded">?</kbd> anytime to open this dialog.
+          Press <kbd className="font-mono bg-gray-200 dark:bg-gray-700 px-1 rounded">?</kbd> anytime to open this dialog.
         </div>
       </div>
     </div>

@@ -13,6 +13,11 @@ export default {
       colors: {
         gray: {
           900: '#121212',
+        },
+        brand: {
+          DEFAULT: '#6965db',
+          500: '#6965db',
+          600: '#5e5ac5',
         }
       },
       fontFamily: {
