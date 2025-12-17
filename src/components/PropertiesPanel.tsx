@@ -6,7 +6,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignVerticalDistributeCenter,
   AlignJustify, Trash2, Undo2, Redo2, Eraser, Palette, Plus,
   Bold, Italic, Lock, Unlock, Type, Code, Pencil, GripHorizontal,
-  Minus, MoreHorizontal
+  Minus, MoreHorizontal, Hash, Grid3x3, Square
 } from "lucide-react";
 
 interface PropertiesPanelProps {
@@ -144,6 +144,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
   const strokeWidth = firstSelectedElement?.strokeWidth || appState.strokeWidth;
   const opacity = firstSelectedElement?.opacity || appState.opacity;
   const strokeStyle = firstSelectedElement?.strokeStyle || appState.strokeStyle || 'solid';
+  const fillStyle = firstSelectedElement?.fillStyle || appState.fillStyle || 'hachure';
   const fontFamily = firstSelectedElement?.fontFamily || 1;
   const fontSize = firstSelectedElement?.fontSize || 20;
 
@@ -234,6 +235,22 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
             </button>
             <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dotted' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <div className="flex gap-0.5"><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /></div>
+            </button>
+          </div>
+        </div>
+
+        {/* Fill Style */}
+        <div>
+          <SectionLabel>Fill Style</SectionLabel>
+          <div className="flex gap-2 p-1 bg-gray-50/50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
+            <button onClick={() => handleUpdate({ fillStyle: 'hachure' })} title="Hachure" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'hachure' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+              <Hash size={18} />
+            </button>
+            <button onClick={() => handleUpdate({ fillStyle: 'cross-hatch' })} title="Cross-Hatch" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'cross-hatch' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+              <Grid3x3 size={18} />
+            </button>
+            <button onClick={() => handleUpdate({ fillStyle: 'solid' })} title="Solid" className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${fillStyle === 'solid' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
+              <Square size={18} fill="currentColor" />
             </button>
           </div>
         </div>

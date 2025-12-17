@@ -22,7 +22,7 @@ export interface Point {
   y: number;
 }
 
-export type AnchorPosition = 'top' | 'right' | 'bottom' | 'left';
+export type AnchorPosition = 'top' | 'right' | 'bottom' | 'left' | 'center';
 
 export interface Binding {
   elementId: string;
@@ -55,6 +55,7 @@ export interface ExcalidrawElement {
   isLocked?: boolean;
   frameId?: string;
   name?: string;
+  seed: number; // For RoughJS deterministic rendering
   // Icon specific properties
   iconPath?: string;
 }

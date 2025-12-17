@@ -161,6 +161,59 @@ const drawWelcomeScreen = (ctx: CanvasRenderingContext2D, width: number, height:
     ctx.restore();
 };
 
+const isLight = (color: string) => {
+    // Simple luminance check for text color contrast
+    // This is a very basic approximation and might not be accurate for all colors
+    const hex = color.startsWith('#') ? color.slice(1) : color;
+    if (hex.length === 3) {
+        const r = parseInt(hex[0] + hex[0], 16);
+        const g = parseInt(hex[1] + hex[1], 16);
+        const b = parseInt(hex[2] + hex[2], 16);
+        return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+    } else if (hex.length === 6) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+    }
+    return false; // Default to dark if color format is unknown
+};
+
+const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement) => {
+    const fontSize = element.fontSize || 20;
+    const font = getFontString({
+        fontSize,
+        fontFamily: element.fontFamily || 1,
+        fontWeight: element.fontWeight,
+        fontStyle: element.fontStyle
+    });
+    ctx.font = font;
+    ctx.fillStyle = element.strokeColor;
+    ctx.textBaseline = "top";
+
+    // Use element width for wrapping
+    const lines = wrapText(element.text || "", font, element.width);
+    const lineHeight = fontSize * 1.25;
+
+    lines.forEach((line, index) => {
+        const lineWidth = ctx.measureText(line).width;
+        let xOffset = 0;
+
+        // Text Alignment
+        if (element.textAlign === 'center') {
+            xOffset = (element.width - lineWidth) / 2;
+        } else if (element.textAlign === 'right') {
+            xOffset = element.width - lineWidth;
+        }
+
+        ctx.fillText(line, element.x + xOffset, element.y + index * lineHeight);
+    });
+};
+
+import rough from 'roughjs/bin/rough';
+
+// ... (existing helper functions like getFontString, etc.)
+
 export const renderScene = (
     ctx: CanvasRenderingContext2D,
     elements: ExcalidrawElement[],
@@ -171,7 +224,8 @@ export const renderScene = (
     selectionBox: { x: number; y: number; width: number; height: number } | null = null,
     laserTrails: { x: number; y: number; time: number }[][] = [],
     editingElementId: string | null = null,
-    showSnapPoints: boolean = false
+    showSnapPoints: boolean = false,
+    theme: 'light' | 'dark' = 'light'
 ) => {
     // Clear canvas
     ctx.save();
@@ -193,53 +247,74 @@ export const renderScene = (
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
+    // Initialize RoughJS
+    const rc = rough.canvas(ctx.canvas);
+
+    // Frame Map for Clipping Lookup
+    const frameMap = new Map<string, ExcalidrawElement>();
+    elements.forEach((el) => {
+        if (el.type === 'frame') frameMap.set(el.id, el);
+    });
+
     elements.forEach((element) => {
         // Skip if editing, but for Frames/Text we have specific logic
         if (editingElementId === element.id && element.type === 'text') return;
 
         ctx.save();
         ctx.globalAlpha = element.opacity / 100;
-        ctx.lineWidth = element.strokeWidth;
-        ctx.strokeStyle = element.strokeColor;
-        ctx.fillStyle = element.backgroundColor;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
 
-        // Stroke Style (Dash/Dot)
-        const sw = element.strokeWidth;
-        const strokeStyle = element.strokeStyle || "solid";
-
-        if (strokeStyle === "dashed") {
-            ctx.setLineDash([sw * 4, sw * 4]);
-        } else if (strokeStyle === "dotted") {
-            ctx.setLineDash([sw, sw * 2]);
-        } else {
-            ctx.setLineDash([]);
-        }
-
-        // Hover Effect (faint outline)
-        if (highlightedElementId === element.id && !selectionIds.includes(element.id)) {
-            ctx.save();
-            ctx.strokeStyle = "#8b5cf6";
-            ctx.lineWidth = 1 / zoom;
-            ctx.globalAlpha = 0.5;
-            ctx.setLineDash([]);
-            let bx = element.x, by = element.y, bw = element.width, bh = element.height;
-            if (element.points) {
-                const xs = element.points.map(p => p.x);
-                const ys = element.points.map(p => p.y);
-                bx = element.x + Math.min(...xs);
-                by = element.y + Math.min(...ys);
-                bw = Math.max(...xs) - Math.min(...xs);
-                bh = Math.max(...ys) - Math.min(...ys);
+        // --- Frame Clipping Logic ---
+        if (element.frameId) {
+            const frame = frameMap.get(element.frameId);
+            if (frame) {
+                ctx.beginPath();
+                // Match the frame's rounded corner radius (8px)
+                // @ts-ignore
+                if (ctx.roundRect) ctx.roundRect(frame.x, frame.y, frame.width, frame.height, 8);
+                else ctx.rect(frame.x, frame.y, frame.width, frame.height);
+                ctx.clip();
             }
-            ctx.strokeRect(bx - 5 / zoom, by - 5 / zoom, bw + 10 / zoom, bh + 10 / zoom);
-            ctx.restore();
         }
+
+        // --- Adaptive Color Logic ---
+        let adaptiveStrokeColor = element.strokeColor;
+        let adaptiveBackgroundColor = element.backgroundColor;
+
+        if (theme === 'dark') {
+            if (element.strokeColor === '#000000' || element.strokeColor === 'black') {
+                adaptiveStrokeColor = '#ffffff';
+            }
+            if (element.backgroundColor === '#000000' || element.backgroundColor === 'black') {
+                adaptiveBackgroundColor = '#ffffff';
+            }
+        } else {
+            if (element.strokeColor === '#ffffff' || element.strokeColor === 'white') {
+                adaptiveStrokeColor = '#000000';
+            }
+            if (element.backgroundColor === '#ffffff' || element.backgroundColor === 'white') {
+                adaptiveBackgroundColor = '#000000';
+            }
+        }
+
+        // RoughJS Options
+        const options = {
+            seed: element.seed, // Deterministic Rendering!
+            stroke: adaptiveStrokeColor,
+            strokeWidth: element.strokeWidth,
+            fill: adaptiveBackgroundColor !== 'transparent' ? adaptiveBackgroundColor : undefined,
+            fillStyle: element.fillStyle || 'hachure', // Dynamic Fill Style
+            fillWeight: element.strokeWidth / 2, // Adjust fill density
+            hachureGap: 4,
+            roughness: 1,
+            bowing: 1,
+            strokeLineDash: element.strokeStyle === 'dashed' ? [element.strokeWidth * 4, element.strokeWidth * 4] :
+                element.strokeStyle === 'dotted' ? [element.strokeWidth, element.strokeWidth * 2] : undefined
+        };
 
         if (element.type === 'text') {
             ctx.setLineDash([]);
-
+            ctx.textBaseline = "top";
+            ctx.fillStyle = adaptiveStrokeColor; // Use adaptive color for text too
             const fontSize = element.fontSize || 20;
             const font = getFontString({
                 fontSize,
@@ -248,221 +323,147 @@ export const renderScene = (
                 fontStyle: element.fontStyle
             });
             ctx.font = font;
-            ctx.fillStyle = element.strokeColor;
-            ctx.textBaseline = "top";
-
-            // Use element width for wrapping
-            const lines = wrapText(element.text || "", font, element.width);
-            const lineHeight = fontSize * 1.25;
-
-            lines.forEach((line, index) => {
-                const lineWidth = ctx.measureText(line).width;
-                let xOffset = 0;
-
-                // Text Alignment
-                if (element.textAlign === 'center') {
-                    xOffset = (element.width - lineWidth) / 2;
-                } else if (element.textAlign === 'right') {
-                    xOffset = element.width - lineWidth;
-                }
-
-                ctx.fillText(line, element.x + xOffset, element.y + index * lineHeight);
-            });
-            ctx.restore();
+            drawText(ctx, element);
+        } else if (element.type === 'rectangle') {
+            rc.rectangle(element.x, element.y, element.width, element.height, options);
         } else if (element.type === 'frame') {
-            // Draw Frame Body
+            // Frames remain CLEAN and STRUCTURAL
+            ctx.save();
+            const frameColor = "#a8a29e";
+            ctx.strokeStyle = frameColor;
             ctx.lineWidth = 1;
-            ctx.strokeStyle = document.documentElement.classList.contains('dark') ? '#4b5563' : '#9ca3af';
 
+            const radius = 8;
             ctx.beginPath();
-            ctx.roundRect(element.x, element.y, element.width, element.height, 8);
+            // @ts-ignore
+            if (ctx.roundRect) ctx.roundRect(element.x, element.y, element.width, element.height, radius);
+            else ctx.rect(element.x, element.y, element.width, element.height);
 
-            if (element.backgroundColor !== "transparent") {
-                ctx.fillStyle = element.backgroundColor;
-                ctx.fill();
+            // Background for frame if set
+            if (element.backgroundColor !== 'transparent') {
+                // Frame background disabled as per user request
+                // ctx.fillStyle = adaptiveBackgroundColor;
+                // ctx.fill();
             }
             ctx.stroke();
 
-            if (editingElementId !== element.id) {
-                ctx.setLineDash([]);
-                ctx.font = `14px sans-serif`;
-                ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6b7280';
-                const label = element.name || "Frame";
-                ctx.fillText(label, element.x, element.y - 18);
+            // Label
+            if (element.name) {
+                ctx.font = `bold ${14 / zoom}px "Inter", sans-serif`;
+                ctx.fillStyle = frameColor;
+                ctx.fillText(element.name, element.x, element.y - (12 / zoom));
             }
-
             ctx.restore();
-        } else if (element.type === 'icon' && element.iconPath) {
-            ctx.save();
-            ctx.translate(element.x, element.y);
-            ctx.fillStyle = element.backgroundColor !== "transparent" ? element.backgroundColor : "transparent";
+        } else if (element.type === 'ellipse') {
+            rc.ellipse(
+                element.x + element.width / 2,
+                element.y + element.height / 2,
+                element.width,
+                element.height,
+                options
+            );
+        } else if (element.type === 'diamond') {
+            const width = element.width;
+            const height = element.height;
+            rc.polygon([
+                [element.x + width / 2, element.y],
+                [element.x + width, element.y + height / 2],
+                [element.x + width / 2, element.y + height],
+                [element.x, element.y + height / 2]
+            ], options);
+        } else if (element.type === 'arrow' || element.type === 'line') {
+            // For linear elements, we use RoughJS for the main path
+            // But we need to handle points carefully
+            if (element.points && element.points.length > 0) {
+                const points = element.points.map(p => [element.x + p.x, element.y + p.y] as [number, number]);
 
-            if (element.backgroundColor !== "transparent") {
+                // Use linearPath for open lines/arrows
+                rc.linearPath(points, options);
+
+                // Arrowhead
+                if (element.type === "arrow") {
+                    const last = element.points[element.points.length - 1];
+                    const prev = element.points[element.points.length - 2];
+                    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+                    const headLen = Math.min(20, Math.max(10, element.strokeWidth * 4));
+
+                    // Calculate arrow head points
+                    const x2 = element.x + last.x;
+                    const y2 = element.y + last.y;
+                    const x1 = x2 - headLen * Math.cos(angle - Math.PI / 6);
+                    const y1 = y2 - headLen * Math.sin(angle - Math.PI / 6);
+                    const x3 = x2 - headLen * Math.cos(angle + Math.PI / 6);
+                    const y3 = y2 - headLen * Math.sin(angle + Math.PI / 6);
+
+                    rc.linearPath([[x1, y1], [x2, y2], [x3, y3]], options);
+                }
+            }
+        } else if (element.type === 'freedraw') {
+            if (element.points && element.points.length > 0) {
+                ctx.strokeStyle = adaptiveStrokeColor;
+                ctx.lineWidth = element.strokeWidth;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
                 ctx.beginPath();
-                ctx.roundRect(0, 0, element.width, element.height, 8);
-                ctx.fill();
+                ctx.moveTo(element.x + element.points[0].x, element.y + element.points[0].y);
+                for (let i = 1; i < element.points.length; i++) {
+                    ctx.lineTo(element.x + element.points[i].x, element.y + element.points[i].y);
+                }
+                ctx.stroke();
             }
-
-            const scaleX = element.width / 24;
-            const scaleY = element.height / 24;
-            ctx.scale(scaleX, scaleY);
-
-            ctx.strokeStyle = element.strokeColor;
-            ctx.lineWidth = 2;
-
-            const path = new Path2D(element.iconPath);
-            ctx.stroke(path);
-
-            ctx.restore();
-        } else {
-            switch (element.type) {
-                case "rectangle":
-                    ctx.beginPath();
-                    ctx.roundRect(element.x, element.y, element.width, element.height, 4);
-                    if (element.backgroundColor !== "transparent") ctx.fill();
-                    ctx.stroke();
-                    break;
-
-                case "ellipse":
-                    ctx.beginPath();
-                    ctx.ellipse(
-                        element.x + element.width / 2,
-                        element.y + element.height / 2,
-                        Math.abs(element.width / 2),
-                        Math.abs(element.height / 2),
-                        0,
-                        0,
-                        2 * Math.PI
-                    );
-                    if (element.backgroundColor !== "transparent") ctx.fill();
-                    ctx.stroke();
-                    break;
-
-                case "diamond":
-                    ctx.beginPath();
-                    const midX = element.x + element.width / 2;
-                    const midY = element.y + element.height / 2;
-                    ctx.moveTo(midX, element.y);
-                    ctx.lineTo(element.x + element.width, midY);
-                    ctx.lineTo(midX, element.y + element.height);
-                    ctx.lineTo(element.x, midY);
-                    ctx.closePath();
-                    if (element.backgroundColor !== "transparent") ctx.fill();
-                    ctx.stroke();
-                    break;
-
-                case "arrow":
-                case "line":
-                    if (element.points && element.points.length > 1) {
-                        ctx.beginPath();
-                        const start = element.points[0];
-                        ctx.moveTo(element.x + start.x, element.y + start.y);
-
-                        if (element.points.length > 2) {
-                            const radius = 8;
-                            for (let i = 1; i < element.points.length - 1; i++) {
-                                const p1 = element.points[i];
-                                const p2 = element.points[i + 1];
-                                const absP1 = { x: element.x + p1.x, y: element.y + p1.y };
-                                const absP2 = { x: element.x + p2.x, y: element.y + p2.y };
-                                ctx.arcTo(absP1.x, absP1.y, absP2.x, absP2.y, radius);
-                            }
-                            const last = element.points[element.points.length - 1];
-                            ctx.lineTo(element.x + last.x, element.y + last.y);
-                        } else {
-                            for (let i = 1; i < element.points.length; i++) {
-                                const cur = element.points[i];
-                                ctx.lineTo(element.x + cur.x, element.y + cur.y);
-                            }
-                        }
-
-                        ctx.stroke();
-
-                        if (element.type === "arrow") {
-                            const end = element.points[element.points.length - 1];
-                            const prev = element.points[element.points.length - 2] || element.points[0];
-                            const angle = Math.atan2(end.y - prev.y, end.x - prev.x);
-                            const headLen = 15 + element.strokeWidth;
-
-                            ctx.setLineDash([]);
-
-                            ctx.beginPath();
-                            ctx.moveTo(element.x + end.x, element.y + end.y);
-                            ctx.lineTo(
-                                element.x + end.x - headLen * Math.cos(angle - Math.PI / 6),
-                                element.y + end.y - headLen * Math.sin(angle - Math.PI / 6)
-                            );
-                            ctx.moveTo(element.x + end.x, element.y + end.y);
-                            ctx.lineTo(
-                                element.x + end.x - headLen * Math.cos(angle + Math.PI / 6),
-                                element.y + end.y - headLen * Math.sin(angle + Math.PI / 6)
-                            );
-                            ctx.stroke();
-                        }
-                    }
-                    break;
-
-                case "freedraw":
-                    if (element.points && element.points.length > 0) {
-                        ctx.beginPath();
-                        ctx.moveTo(element.x + element.points[0].x, element.y + element.points[0].y);
-                        for (let i = 1; i < element.points.length; i++) {
-                            ctx.lineTo(element.x + element.points[i].x, element.y + element.points[i].y);
-                        }
-                        ctx.stroke();
-                    }
-                    break;
-            }
-            ctx.restore();
         }
+        ctx.restore();
+    });
 
-        // --- Selection UI ---
+    // --- Selection UI ---
+    elements.forEach(element => {
         if (selectionIds.includes(element.id)) {
             ctx.save();
-            // Selection Colors: Solid Purple like Excalidraw default or specific blue
             const selectionColor = element.isLocked ? "#ef4444" : "#8b5cf6";
             ctx.strokeStyle = selectionColor;
             ctx.lineWidth = 1 / zoom;
             ctx.setLineDash([]);
 
-            const buffer = 8 / zoom; // Padding around the element
-
-            let minX = element.x;
-            let minY = element.y;
-            let maxX = element.x + element.width;
-            let maxY = element.y + element.height;
-
-            if (element.points) {
-                const xs = element.points.map(p => p.x);
-                const ys = element.points.map(p => p.y);
-                minX = element.x + Math.min(...xs);
-                maxX = element.x + Math.max(...xs);
-                minY = element.y + Math.min(...ys);
-                maxY = element.y + Math.max(...ys);
-            }
-
+            const buffer = 8 / zoom;
             const isLinear = element.type === 'line' || element.type === 'arrow';
 
-            // Draw Selection Border
-            // Only draw bbox if NOT linear or if multiple selection
-            if (!isLinear || selectionIds.length > 1) {
-                ctx.strokeRect(
-                    minX - buffer,
-                    minY - buffer,
-                    (maxX - minX) + buffer * 2,
-                    (maxY - minY) + buffer * 2
-                );
-            }
-
-            // Draw Lock Icon if locked
-            if (element.isLocked) {
-                drawLockIcon(ctx, minX, minY - 20 / zoom, 14 / zoom);
-            }
-
-            // Draw Resize Handles (only if single selection and not locked)
+            // Draw Resize Handles
             if (selectionIds.length === 1 && !element.isLocked) {
+                // Draw Selection Border (Padded Box)
+                if (!isLinear) {
+                    const cx = element.x + element.width / 2;
+                    const cy = element.y + element.height / 2;
+                    const p = buffer;
+
+                    ctx.save();
+                    ctx.translate(cx, cy);
+                    ctx.rotate(element.angle || 0);
+
+                    ctx.beginPath();
+                    // Use roundRect for Excalidraw-like smoothed corners
+                    // @ts-ignore
+                    if (ctx.roundRect) {
+                        ctx.roundRect(
+                            -element.width / 2 - p,
+                            -element.height / 2 - p,
+                            element.width + p * 2,
+                            element.height + p * 2,
+                            8 / zoom
+                        );
+                    } else {
+                        ctx.rect(
+                            -element.width / 2 - p,
+                            -element.height / 2 - p,
+                            element.width + p * 2,
+                            element.height + p * 2
+                        );
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
                 const handles = getResizeHandles(element);
-                const handleSize = 8 / zoom; // Smaller, cleaner handles
+                const handleSize = 8 / zoom;
 
                 ctx.strokeStyle = selectionColor;
                 ctx.lineWidth = 1 / zoom;
@@ -472,13 +473,10 @@ export const renderScene = (
                 keys.forEach(key => {
                     // @ts-ignore
                     const p = handles[key];
-
-                    // Handle adjustment based on buffer
                     let hx = p.x;
                     let hy = p.y;
 
                     if (!isLinear && !(typeof key === 'string' && key.startsWith('p:'))) {
-                        // Push handles out by buffer amount
                         if (key.includes('w')) hx -= buffer;
                         if (key.includes('e')) hx += buffer;
                         if (key.includes('n')) hy -= buffer;
@@ -486,9 +484,8 @@ export const renderScene = (
                     }
 
                     ctx.beginPath();
-
                     if (typeof key === 'string' && (key.startsWith('p:') || key.startsWith('m:'))) {
-                        // Circle handles for points
+                        // ... line handles ...
                         const isMid = key.startsWith('m:');
                         if (isMid) {
                             ctx.fillStyle = selectionColor;
@@ -503,16 +500,50 @@ export const renderScene = (
                             ctx.stroke();
                         }
                     } else if (!isLinear) {
-                        // Square handles for shapes (Solid Line + White Fill)
                         ctx.fillStyle = "#ffffff";
-                        // Rounded rect for handle
                         ctx.roundRect(hx - handleSize / 2, hy - handleSize / 2, handleSize, handleSize, 2 / zoom);
                         ctx.fill();
                         ctx.stroke();
+
+                        // --- Smart Connector Hints (N, E, S, W) ---
+                        // Only draw if key is n, e, s, w
+                        if (['n', 'e', 's', 'w'].includes(key as string)) {
+                            const offset = 12 / zoom; // Distance from resize handle
+                            ctx.beginPath();
+                            ctx.fillStyle = selectionColor;
+
+                            // Draw small triangle pointing out
+                            const arrowSize = 4 / zoom;
+                            let ax = hx, ay = hy;
+
+                            if (key === 'n') ay -= offset;
+                            if (key === 's') ay += offset;
+                            if (key === 'w') ax -= offset;
+                            if (key === 'e') ax += offset;
+
+                            // Draw triangle/caret
+                            if (key === 'n') {
+                                ctx.moveTo(ax, ay - arrowSize);
+                                ctx.lineTo(ax - arrowSize, ay + arrowSize);
+                                ctx.lineTo(ax + arrowSize, ay + arrowSize);
+                            } else if (key === 's') {
+                                ctx.moveTo(ax, ay + arrowSize);
+                                ctx.lineTo(ax - arrowSize, ay - arrowSize);
+                                ctx.lineTo(ax + arrowSize, ay - arrowSize);
+                            } else if (key === 'w') {
+                                ctx.moveTo(ax - arrowSize, ay);
+                                ctx.lineTo(ax + arrowSize, ay - arrowSize);
+                                ctx.lineTo(ax + arrowSize, ay + arrowSize);
+                            } else if (key === 'e') {
+                                ctx.moveTo(ax + arrowSize, ay);
+                                ctx.lineTo(ax - arrowSize, ay - arrowSize);
+                                ctx.lineTo(ax - arrowSize, ay + arrowSize);
+                            }
+                            ctx.fill();
+                        }
                     }
                 });
             }
-
             ctx.restore();
         }
     });

@@ -11,7 +11,23 @@ import HelpDialog from '../components/HelpDialog';
 import MainMenu from '../components/MainMenu';
 import { AppState, ExcalidrawElement, Point, ToolType, TOOLS, Binding } from '../types';
 import { renderScene, getFontFamilyString, getFontString, measureText } from '../utils/renderer';
-import { getElementAtPosition, getClosestSnapPoint, getAnchorPosition, getSnapPoints, getElementsWithinRect, getResizeHandleAtPosition, getCursorForHandle, resizeElement, generateOrthogonalPoints, getSmartAnchors } from '../utils/geometry';
+import {
+    getDistance,
+    hitTest,
+    getElementAtPosition,
+    getElementsWithinRect,
+    getResizeHandles,
+    getResizeHandleAtPosition,
+    getConnectorHandleAtPosition,
+    getCursorForHandle,
+    resizeElement,
+    getSnapPoints,
+    getClosestSnapPoint,
+    getAnchorPosition,
+    generateOrthogonalPoints,
+    getSmartAnchors,
+    getIntersectingPoint
+} from '../utils/geometry';
 import { findEnclosingFrame } from '../utils/frameUtils';
 import { ARCHITECTURE_ICONS } from '../utils/icons';
 import { useFrame } from '../hooks/useFrame';
@@ -26,6 +42,7 @@ const EditorPage = () => {
         backgroundColor: "transparent",
         strokeWidth: 2,
         strokeStyle: "solid", // Initialized
+        fillStyle: "hachure", // Initialized
         opacity: 100,
         pan: { x: 0, y: 0 },
         zoom: 1,
@@ -195,7 +212,9 @@ const EditorPage = () => {
             id: crypto.randomUUID(),
             x: el.x + offset,
             y: el.y + offset,
-            groupIds: el.groupIds ? [...el.groupIds] : undefined
+            groupIds: el.groupIds ? [...el.groupIds] : undefined,
+            seed: Math.floor(Math.random() * 2 ** 31) // Refresh seed on paste? Maybe yes.
+            , fillStyle: el.fillStyle || "hachure"
         }));
         updateElements([...elements, ...newElements], true);
         setAppState(prev => ({ ...prev, selectedElementIds: newElements.map(e => e.id) }));
@@ -209,7 +228,9 @@ const EditorPage = () => {
             ...el,
             id: crypto.randomUUID(),
             x: el.x + offset,
-            y: el.y + offset
+            y: el.y + offset,
+            seed: Math.floor(Math.random() * 2 ** 31),
+            fillStyle: el.fillStyle || "hachure"
         }));
         updateElements([...elements, ...newElements], true);
         setAppState(prev => ({ ...prev, selectedElementIds: newElements.map(e => e.id) }));
@@ -322,8 +343,10 @@ const EditorPage = () => {
             backgroundColor: iconDef.defaultColor, // Use category color
             strokeWidth: 2,
             strokeStyle: 'solid',
+            fillStyle: 'solid', // User usually wants icons solid? Or appState? Let's force solid for icons for now or they look weird hachured.
             opacity: 100,
-            iconPath: iconDef.path
+            iconPath: iconDef.path,
+            seed: Math.floor(Math.random() * 2 ** 31)
         };
 
         updateElements([...elements, newIcon], true);
@@ -572,6 +595,40 @@ const EditorPage = () => {
                         }));
                         return;
                     }
+
+                    // --- Smart Connectors Check ---
+                    const connectorKey = getConnectorHandleAtPosition(pos.x, pos.y, element, appState.zoom);
+                    if (connectorKey) {
+                        // Start Smart Arrow
+                        const anchorMap: Record<string, 'top' | 'right' | 'bottom' | 'left'> = {
+                            'n': 'top', 'e': 'right', 's': 'bottom', 'w': 'left'
+                        };
+                        const anchor = anchorMap[connectorKey as string];
+                        const startPoint = getAnchorPosition(element, anchor);
+
+                        setAppState(prev => ({ ...prev, tool: 'arrow', isDragging: true, selectionStart: pos }));
+
+                        const id = crypto.randomUUID();
+                        const newArrow: ExcalidrawElement = {
+                            id,
+                            type: 'arrow',
+                            x: startPoint.x,
+                            y: startPoint.y,
+                            width: 0,
+                            height: 0,
+                            strokeColor: appState.strokeColor,
+                            backgroundColor: appState.backgroundColor,
+                            strokeWidth: appState.strokeWidth,
+                            strokeStyle: appState.strokeStyle,
+                            fillStyle: appState.fillStyle,
+                            opacity: appState.opacity,
+                            points: [{ x: 0, y: 0 }, { x: 0, y: 0 }], // Start with 0 length
+                            startBinding: { elementId: element.id, anchor },
+                            seed: Math.floor(Math.random() * 2 ** 31)
+                        };
+                        setTempElement(newArrow);
+                        return;
+                    }
                 }
             }
         }
@@ -626,7 +683,7 @@ const EditorPage = () => {
             e.preventDefault();
             const id = crypto.randomUUID();
             const newEl: ExcalidrawElement = {
-                id, type: 'text', x: pos.x, y: pos.y, width: 20, height: 24, strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor, strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20, fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid"
+                id, type: 'text', x: pos.x, y: pos.y, width: 20, height: 24, strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor, strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20, fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid", seed: Math.floor(Math.random() * 2 ** 31), fillStyle: appState.fillStyle
             };
             setElements([...elements, newEl]);
             setAppState(prev => ({ ...prev, tool: 'selection', editingElementId: id, selectedElementIds: [id] }));
@@ -670,13 +727,15 @@ const EditorPage = () => {
             width: 0,
             height: 0,
             strokeColor: appState.strokeColor,
-            backgroundColor: appState.backgroundColor,
+            backgroundColor: appState.tool === 'frame' ? 'transparent' : appState.backgroundColor,
             strokeWidth: appState.strokeWidth,
-            strokeStyle: appState.strokeStyle, // Set stroke style
+            strokeStyle: appState.tool === 'frame' ? 'solid' : appState.strokeStyle, // Set stroke style
+            fillStyle: appState.tool === 'frame' ? 'solid' : appState.fillStyle,
             opacity: appState.opacity,
             points: initialPoints,
             startBinding,
-            name
+            name,
+            seed: Math.floor(Math.random() * 2 ** 31)
         };
         setTempElement(newElement);
     };
@@ -708,8 +767,10 @@ const EditorPage = () => {
                 fontFamily: 1,
                 fontWeight: 400,
                 fontStyle: 'normal',
-                strokeStyle: "solid"
+                strokeStyle: "solid",
+                seed: Math.floor(Math.random() * 2 ** 31)
             };
+
             setElements(prev => [...prev, newEl]);
             setAppState(prev => ({
                 ...prev,
@@ -765,14 +826,26 @@ const EditorPage = () => {
             let newPos = pos;
             let binding: Binding | undefined = undefined;
 
-            // Snapping for linear resize
+            // Dynamic Binding Logic
             if ((originalElement.type === 'arrow' || originalElement.type === 'line') && (handle === 'start' || handle === 'end')) {
                 if (hoveredEl) {
-                    const snap = getClosestSnapPoint(pos.x, pos.y, hoveredEl);
-                    if (snap) {
-                        newPos = { x: snap.x, y: snap.y };
-                        binding = { elementId: hoveredEl.id, anchor: snap.anchor };
-                    }
+                    // Find the "fixed" point of the arrow (the one we aren't dragging)
+                    // If dragging start (index 0), fixed is end (index -1). And vice versa.
+                    const fixedIdx = handle === 'start' ? originalElement.points!.length - 1 : 0;
+                    const fixedPointRel = originalElement.points![fixedIdx];
+                    const fixedPointAbs = {
+                        x: originalElement.x + fixedPointRel.x,
+                        y: originalElement.y + fixedPointRel.y
+                    };
+
+                    // Calculate intersection: Ray from FixedPoint -> HoveredShape Center
+                    // This gives the clean "center-pointing" arrow effect
+                    const intersect = getIntersectingPoint(hoveredEl, fixedPointAbs);
+
+                    newPos = intersect;
+                    // We use 'center' as a marker for dynamic binding (needs type update or cast)
+                    // @ts-ignore
+                    binding = { elementId: hoveredEl.id, anchor: 'center' };
                 }
             }
 
@@ -991,12 +1064,60 @@ const EditorPage = () => {
 
                 // Commit Arrow/Line bindings
                 if ((finalElement.type === 'arrow' || finalElement.type === 'line')) {
-                    const pos = getPointerPos(e);
-                    const hoveredEl = getElementAtPosition(pos.x, pos.y, elements);
-                    if (hoveredEl) {
-                        const snap = getClosestSnapPoint(pos.x, pos.y, hoveredEl);
+                    const pos = finalElement.points && finalElement.points.length > 0
+                        ? { x: finalElement.x + finalElement.points[finalElement.points.length - 1].x, y: finalElement.y + finalElement.points[finalElement.points.length - 1].y }
+                        : { x: finalElement.x, y: finalElement.y };
+
+                    const endHovered = getElementAtPosition(pos.x, pos.y, elements);
+                    if (endHovered && endHovered.id !== finalElement.id) {
+                        const snap = getClosestSnapPoint(pos.x, pos.y, endHovered);
                         if (snap) {
-                            finalElement.endBinding = { elementId: hoveredEl.id, anchor: snap.anchor };
+                            finalElement.endBinding = { elementId: endHovered.id, anchor: snap.anchor };
+                            // Snap the point
+                            if (finalElement.points) {
+                                finalElement.points[finalElement.points.length - 1] = {
+                                    x: snap.x - finalElement.x,
+                                    y: snap.y - finalElement.y
+                                };
+                            }
+                        }
+                    } else if (finalElement.startBinding && !finalElement.endBinding) {
+                        // --- Smart Duplicate on Drop ---
+                        // If we dragged from a shape but dropped in empty space, duplicate the source shape!
+                        const sourceEl = elements.find(el => el.id === finalElement.startBinding!.elementId);
+                        if (sourceEl && ['rectangle', 'ellipse', 'diamond', 'frame'].includes(sourceEl.type)) {
+                            const cloneId = crypto.randomUUID();
+
+                            // Determine Drop Position (Center of clone at Arrow Tip)
+                            const cloneX = pos.x - (sourceEl.width / 2);
+                            const cloneY = pos.y - (sourceEl.height / 2);
+
+                            const cloneEl: ExcalidrawElement = {
+                                ...sourceEl,
+                                id: cloneId,
+                                x: cloneX,
+                                y: cloneY,
+                                // Reset bindings if any on source
+                                startBinding: undefined,
+                                endBinding: undefined,
+                                groupIds: [], // Don't copy groups
+                                name: sourceEl.type === 'frame' ? `${sourceEl.name} (Copy)` : undefined
+                            };
+
+                            // Update Arrow to bind to new clone
+                            const snap = getClosestSnapPoint(pos.x, pos.y, cloneEl);
+                            if (snap) {
+                                finalElement.endBinding = { elementId: cloneId, anchor: snap.anchor };
+                                if (finalElement.points) {
+                                    finalElement.points[finalElement.points.length - 1] = {
+                                        x: snap.x - finalElement.x,
+                                        y: snap.y - finalElement.y
+                                    };
+                                }
+                            }
+
+                            // Add clone to elements
+                            setElements(prev => [...prev, cloneEl]);
                         }
                     }
                 }
@@ -1006,20 +1127,12 @@ const EditorPage = () => {
 
                 if (finalElement.type === 'frame') {
                     // Frame Creation: Capture existing elements inside the new frame
-                    // Pass the FULL list including the new frame to defineFrameGroups
                     nextElements = defineFrameGroups(nextElements, finalElement);
                 } else {
                     // Other Element Creation: Check if dropped inside an existing frame
                     const enclosingFrame = findEnclosingFrame(finalElement, elements);
                     if (enclosingFrame) {
                         finalElement.frameId = enclosingFrame.id;
-                        // Re-create nextElements with potentially modified frameId in finalElement
-                        // Note: finalElement matches the last item in nextElements by ref if we didn't clone above, 
-                        // but we did spreads.
-                        // Actually 'finalElement' is local. 'nextElements' has a COPY of 'finalElement' or reference?
-                        // `[...elements, finalElement]` -> finalElement IS the reference.
-                        // So updating finalElement.frameId works if we do it before spreading?
-                        // Or we can map.
                         nextElements = nextElements.map(el => el.id === finalElement.id ? { ...el, frameId: enclosingFrame.id } : el);
                     }
                 }

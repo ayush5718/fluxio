@@ -2,6 +2,98 @@
 import { ExcalidrawElement, Point, AnchorPosition, ResizeHandle } from "../types";
 import { measureText } from "./renderer";
 
+// --- Geometry Intersection Utils ---
+
+export const getElementBounds = (element: ExcalidrawElement) => {
+    return {
+        x: element.x,
+        y: element.y,
+        w: element.width,
+        h: element.height,
+        cx: element.x + element.width / 2,
+        cy: element.y + element.height / 2
+    };
+};
+
+// Find intersection of line (p1->p2) with rectangle (x,y,w,h)
+const intersectLineRect = (p1: Point, p2: Point, x: number, y: number, w: number, h: number): Point | null => {
+    const minX = x, maxX = x + w, minY = y, maxY = y + h;
+    const points: Point[] = [];
+
+    // Liang-Barsky or simple 4-segment check
+    const segments = [
+        [{ x: minX, y: minY }, { x: maxX, y: minY }], // Top
+        [{ x: maxX, y: minY }, { x: maxX, y: maxY }], // Right
+        [{ x: maxX, y: maxY }, { x: minX, y: maxY }], // Bottom
+        [{ x: minX, y: maxY }, { x: minX, y: minY }]  // Left
+    ];
+
+    segments.forEach(([a, b]) => {
+        const det = (p2.x - p1.x) * (b.y - a.y) - (b.x - a.x) * (p2.y - p1.y);
+        if (det === 0) return;
+        const lambda = ((b.y - a.y) * (b.x - p1.x) + (a.x - b.x) * (b.y - p1.y)) / det;
+        const gamma = ((p1.y - p2.y) * (b.x - p1.x) + (p2.x - p1.x) * (b.y - p1.y)) / det;
+        if (0 <= lambda && lambda <= 1 && 0 <= gamma && gamma <= 1) {
+            points.push({
+                x: p1.x + lambda * (p2.x - p1.x),
+                y: p1.y + lambda * (p2.y - p1.y)
+            });
+        }
+    });
+
+    // Return point closest to p1 (source)
+    if (points.length === 0) return null;
+    return points.reduce((prev, curr) => getDistance(p1, prev) < getDistance(p1, curr) ? prev : curr);
+};
+
+// Ray-casting approach: Intersect ray from P1 (external) to P2 (center) with Element
+export const getIntersectingPoint = (element: ExcalidrawElement, fromPoint: Point): Point => {
+    const { x, y, w, h, cx, cy } = getElementBounds(element);
+    const center = { x: cx, y: cy };
+
+    if (element.type === 'ellipse') {
+        // Ellipse Intersection
+        // x = cx + w/2 cos t, y = cy + h/2 sin t
+        const angle = Math.atan2(fromPoint.y - cy, fromPoint.x - cx);
+        return {
+            x: cx + (w / 2) * Math.cos(angle),
+            y: cy + (h / 2) * Math.sin(angle)
+        };
+    }
+
+    if (element.type === 'diamond') {
+        const top = { x: cx, y: y };
+        const right = { x: x + w, y: cy };
+        const bottom = { x: cx, y: y + h };
+        const left = { x: x, y: cy };
+
+        // Treat diamond as 4 segments
+        // We want intersection of Line(From -> Center) with these 4 segments
+        const segments = [[top, right], [right, bottom], [bottom, left], [left, top]];
+
+        // Re-use logic: Intersection of Ray(From -> Center)
+        // Manual segment check
+        for (const [a, b] of segments) {
+            const det = (center.x - fromPoint.x) * (b.y - a.y) - (b.x - a.x) * (center.y - fromPoint.y);
+            if (det === 0) continue;
+            const lambda = ((b.y - a.y) * (b.x - fromPoint.x) + (a.x - b.x) * (b.y - fromPoint.y)) / det;
+            const gamma = ((fromPoint.y - center.y) * (b.x - fromPoint.x) + (center.x - fromPoint.x) * (b.y - fromPoint.y)) / det;
+            if (0 <= lambda && lambda <= 1 && 0 <= gamma && gamma <= 1) {
+                return {
+                    x: fromPoint.x + lambda * (center.x - fromPoint.x),
+                    y: fromPoint.y + lambda * (center.y - fromPoint.y)
+                };
+            }
+        }
+        return center;
+    }
+
+    // Default: Rectangle / Frame / Text
+    // Intersect (From -> Center) with Rect
+    const rectInt = intersectLineRect(fromPoint, center, x, y, w, h);
+    return rectInt || center; // Fallback to center if inside (shouldn't happen usually)
+};
+
 export const getDistance = (p1: Point, p2: Point) => {
     return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 };
@@ -16,7 +108,7 @@ const distanceToSegment = (p: Point, a: Point, b: Point) => {
 };
 
 // Returns 'stroke', 'fill', or null
-const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stroke' | 'fill' | null => {
+export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stroke' | 'fill' | null => {
     const { type, x: ex, y: ey, width, height, points, strokeWidth } = element;
     const threshold = Math.max(10, strokeWidth);
 
@@ -418,6 +510,33 @@ export const getResizeHandles = (element: ExcalidrawElement): Record<string, Poi
 export const getResizeHandleAtPosition = (x: number, y: number, element: ExcalidrawElement, zoom: number): ResizeHandle | null => {
     const handles = getResizeHandles(element);
     const threshold = 10 / zoom;
+
+    for (const [key, pos] of Object.entries(handles)) {
+        if (getDistance({ x, y }, pos as Point) < threshold) {
+            return key as ResizeHandle;
+        }
+    }
+    return null;
+};
+
+export const getConnectorHandles = (element: ExcalidrawElement, zoom: number): Record<string, Point> => {
+    const { x, y, width, height, type } = element;
+    if (type === 'line' || type === 'arrow' || type === 'freedraw') return {};
+
+    // Offset for the connector handles (outside the resize handles)
+    const offset = 24 / zoom;
+
+    return {
+        n: { x: x + width / 2, y: y - offset },
+        e: { x: x + width + offset, y: y + height / 2 },
+        s: { x: x + width / 2, y: y + height + offset },
+        w: { x: x - offset, y: y + height / 2 },
+    };
+};
+
+export const getConnectorHandleAtPosition = (x: number, y: number, element: ExcalidrawElement, zoom: number): ResizeHandle | null => {
+    const handles = getConnectorHandles(element, zoom);
+    const threshold = 12 / zoom; // Slightly larger hit area
 
     for (const [key, pos] of Object.entries(handles)) {
         if (getDistance({ x, y }, pos as Point) < threshold) {

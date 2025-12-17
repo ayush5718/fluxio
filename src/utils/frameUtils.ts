@@ -76,3 +76,24 @@ export const removeElementsFromFrame = (elements: ExcalidrawElement[], elementId
         return el;
     });
 };
+
+
+/**
+ * Checks if an element overlaps a frame by at least 50% of the element's area.
+ */
+export const doesElementOverlapFrame = (element: ExcalidrawElement, frame: ExcalidrawElement, threshold: number = 0.5): boolean => {
+    // 1. Calculate Intersection Rectangle
+    const x1 = Math.max(element.x, frame.x);
+    const y1 = Math.max(element.y, frame.y);
+    const x2 = Math.min(element.x + element.width, frame.x + frame.width);
+    const y2 = Math.min(element.y + element.height, frame.y + frame.height);
+
+    if (x2 < x1 || y2 < y1) return false; // No overlap
+
+    const intersectionArea = (x2 - x1) * (y2 - y1);
+    const elementArea = element.width * element.height;
+
+    if (elementArea === 0) return false;
+
+    return (intersectionArea / elementArea) >= threshold;
+};
