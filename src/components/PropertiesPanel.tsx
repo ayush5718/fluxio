@@ -78,7 +78,7 @@ const IconButton: React.FC<{ onClick: () => void; icon: React.ElementType; title
         className={`p-2 rounded-lg transition-all duration-150 flex items-center justify-center
         ${disabled ? 'opacity-30 cursor-not-allowed' :
             active ? 'bg-violet-600 text-white shadow-sm' :
-              'bg-gray-800/50 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+              'bg-gray-100 dark:bg-gray-800/50 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'}`}
       >
         <Icon size={16} strokeWidth={2} />
       </button>
@@ -184,20 +184,20 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
       ref={panelRef}
       onMouseDown={startDrag}
       style={{ left: position.x, top: position.y }}
-      className={`fixed z-50 w-[280px] flex flex-col bg-[#1e1e1e] border border-gray-800 rounded-3xl shadow-2xl backdrop-blur-md overflow-hidden select-none transition-shadow ${isDragging ? 'shadow-violet-500/10 cursor-grabbing' : ''}`}
+      className={`fixed z-50 w-[280px] flex flex-col bg-white/80 dark:bg-[#1e1e1e]/90 border border-white/20 dark:border-gray-800 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] dark:shadow-2xl backdrop-blur-xl overflow-hidden select-none transition-shadow ${isDragging ? 'shadow-violet-500/10 cursor-grabbing' : ''}`}
     >
       {/* Header / Drag Handle */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-800 drag-handle cursor-grab active:cursor-grabbing bg-[#1e1e1e]">
+      <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 drag-handle cursor-grab active:cursor-grabbing bg-transparent">
         <div className="flex gap-2">
-          <button onClick={undo} className="p-1.5 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition"><Undo2 size={16} /></button>
-          <button onClick={redo} className="p-1.5 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition"><Redo2 size={16} /></button>
+          <button onClick={undo} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"><Undo2 size={16} /></button>
+          <button onClick={redo} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"><Redo2 size={16} /></button>
         </div>
-        <div className="w-12 h-1 bg-gray-800 rounded-full" />
+        <div className="w-12 h-1 bg-gray-300 dark:bg-gray-800 rounded-full" />
         <div className="w-14" /> {/* Spacer for balance */}
       </div>
 
       {/* Main Content */}
-      <div className="p-5 flex flex-col gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
+      <div className="p-5 flex flex-col gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar bg-transparent">
 
         {/* Colors */}
         <div>
@@ -217,7 +217,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         </div>
 
         {/* Sliders */}
-        <div className="bg-gray-800/30 p-3 rounded-xl border border-gray-800 space-y-2">
+        <div className="bg-gray-50/50 dark:bg-gray-800/30 p-3 rounded-xl border border-gray-100 dark:border-gray-800 space-y-2">
           <RangeSlider label="Width" min={1} max={20} value={strokeWidth} onChange={(v) => handleUpdate({ strokeWidth: v })} />
           <RangeSlider label="Opacity" min={10} max={100} value={opacity} onChange={(v) => handleUpdate({ opacity: v })} />
         </div>
@@ -225,14 +225,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         {/* Stroke Style */}
         <div>
           <SectionLabel>Stroke Style</SectionLabel>
-          <div className="flex gap-2 p-1 bg-gray-800/50 rounded-lg border border-gray-800">
-            <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'solid' ? 'bg-violet-600/20 text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-700/50'}`}>
+          <div className="flex gap-2 p-1 bg-gray-50/50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
+            <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'solid' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <Minus size={18} />
             </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dashed' ? 'bg-violet-600/20 text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dashed' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <MoreHorizontal size={18} />
             </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dotted' ? 'bg-violet-600/20 text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-700/50'}`}>
+            <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-1.5 rounded-md flex justify-center items-center gap-2 ${strokeStyle === 'dotted' ? 'bg-violet-600/20 text-violet-600 dark:text-violet-400 ring-1 ring-violet-500/50' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'}`}>
               <div className="flex gap-0.5"><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /></div>
             </button>
           </div>
@@ -242,15 +242,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         {isTextSelected && (
           <div className="animate-in slide-in-from-right-4 duration-300">
             <SectionLabel>Typography</SectionLabel>
-            <div className="flex flex-col gap-2 p-3 bg-gray-800/30 rounded-xl border border-gray-800">
+            <div className="flex flex-col gap-2 p-3 bg-gray-50/50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800">
               <div className="flex gap-1 justify-between">
-                <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 1 ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>Draw</button>
-                <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 2 ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>Sans</button>
-                <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 3 ? 'bg-violet-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}>Mono</button>
+                <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 1 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Draw</button>
+                <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 2 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Sans</button>
+                <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1.5 rounded text-xs ${fontFamily === 3 ? 'bg-violet-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>Mono</button>
               </div>
               <div className="grid grid-cols-4 gap-1 mt-1">
                 {[16, 20, 28, 36].map(s => (
-                  <button key={s} onClick={() => handleUpdate({ fontSize: s })} className={`py-1 rounded text-xs font-mono ${fontSize === s ? 'bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-500 hover:bg-white/5'}`}>
+                  <button key={s} onClick={() => handleUpdate({ fontSize: s })} className={`py-1 rounded text-xs font-mono ${fontSize === s ? 'bg-gray-900 dark:bg-white/10 text-white ring-1 ring-white/20' : 'text-gray-500 hover:bg-gray-200 dark:hover:bg-white/5'}`}>
                     {s}
                   </button>
                 ))}
@@ -269,7 +269,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
               <IconButton onClick={() => onLayerChange('forward')} icon={ChevronUp} title="Bring Forward" disabled={!hasSelection} />
               <IconButton onClick={() => onLayerChange('front')} icon={BringToFront} title="Bring to Front" disabled={!hasSelection} />
 
-              <div className="col-span-4 h-[1px] bg-gray-800 my-1" />
+              <div className="col-span-4 h-[1px] bg-gray-100 dark:bg-gray-800 my-1" />
 
               <IconButton onClick={onGroup} icon={Group} title="Group" disabled={!hasMultipleSelection} />
               <IconButton onClick={onUngroup} icon={Ungroup} title="Ungroup" disabled={!hasSelection} />
@@ -282,7 +282,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
       </div>
 
       {/* Footer Actions */}
-      <div className="p-4 border-t border-gray-800 bg-[#1e1e1e] flex flex-col gap-2">
+      <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-transparent flex flex-col gap-2">
         {hasSelection && (
           <button
             onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))}

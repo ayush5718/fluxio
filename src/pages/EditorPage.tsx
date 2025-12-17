@@ -8,6 +8,7 @@ import ContextMenu from '../components/ContextMenu';
 import IconLibrary from '../components/IconLibrary';
 import QuickActions from '../components/QuickActions';
 import HelpDialog from '../components/HelpDialog';
+import MainMenu from '../components/MainMenu';
 import { AppState, ExcalidrawElement, Point, ToolType, TOOLS, Binding } from '../types';
 import { renderScene, getFontFamilyString, getFontString, measureText } from '../utils/renderer';
 import { getElementAtPosition, getClosestSnapPoint, getAnchorPosition, getSnapPoints, getElementsWithinRect, getResizeHandleAtPosition, getCursorForHandle, resizeElement, generateOrthogonalPoints, getSmartAnchors } from '../utils/geometry';
@@ -1053,11 +1054,42 @@ const EditorPage = () => {
         currentLaserRef.current = [];
     };
 
+
+    // --- Fix: Handle Text Blur (Remove empty text) ---
+    const handleTextBlur = () => {
+        if (appState.editingElementId) {
+            const el = elements.find(e => e.id === appState.editingElementId);
+            if (el && el.type === 'text' && (!el.text || el.text.trim() === '')) {
+                // Remove empty text element
+                updateElements(elements.filter(e => e.id !== el.id));
+            }
+            setAppState(prev => ({ ...prev, editingElementId: null }));
+        }
+    };
+
     return (
         <div
             className="relative w-full h-screen overflow-hidden bg-[#f8f9fa] dark:bg-[#121212] touch-none select-none text-gray-900 dark:text-gray-100 transition-colors duration-200"
+            style={{ backgroundColor: appState.viewBackgroundColor }}
             onContextMenu={handleContextMenu}
         >
+            {/* --- Main Menu (Top Right) --- */}
+            <div className="fixed top-6 right-6 z-50">
+                <MainMenu
+                    appState={appState}
+                    setAppState={setAppState}
+                    onClearCanvas={() => {
+                        if (window.confirm('Are you sure you want to clear the canvas?')) {
+                            setElements([]);
+                            clearHistory();
+                        }
+                    }}
+                    theme={theme}
+                    onThemeChange={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
+                    onOpenHelp={() => setIsHelpOpen(true)}
+                />
+            </div>
+
             <canvas
                 ref={canvasRef}
                 onMouseDown={handleMouseDown}
@@ -1074,10 +1106,10 @@ const EditorPage = () => {
                     const isFrame = el.type === 'frame';
                     const textValue = isFrame ? (el.name || "Frame") : (el.text || "");
 
-                    // Style for Frame name editing (above the frame) vs Text element editing
+                    // Fix: Tighter line height for text editing to match rendering
                     const style: React.CSSProperties = isFrame ? {
                         left: (el.x * appState.zoom) + appState.pan.x,
-                        top: ((el.y - 24) * appState.zoom) + appState.pan.y, // Position above frame
+                        top: ((el.y - 24) * appState.zoom) + appState.pan.y,
                         fontSize: 14 * appState.zoom,
                         fontFamily: 'sans-serif',
                         color: document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6b7280',
@@ -1090,16 +1122,21 @@ const EditorPage = () => {
                         fontWeight: el.fontWeight,
                         fontStyle: el.fontStyle,
                         color: el.strokeColor,
+                        // Ensure min width/height for usability
+                        minWidth: 20 * appState.zoom,
+                        minHeight: (el.fontSize || 20) * 1.25 * appState.zoom,
                         width: Math.max((el.width || 10) * appState.zoom, 50 * appState.zoom),
-                        height: Math.max((el.height || 20) * appState.zoom, 30 * appState.zoom),
-                        lineHeight: 1.2,
-                        transformOrigin: 'top left'
+                        height: Math.max((el.height || 20) * appState.zoom, (el.fontSize || 20) * 1.25 * appState.zoom),
+                        transformOrigin: 'top left',
+                        lineHeight: '1.25',
+                        padding: 0,
+                        margin: 0
                     };
 
                     return (
                         <textarea
                             ref={textAreaRef}
-                            className="fixed z-10 bg-transparent outline-none resize-none overflow-hidden p-0 m-0 border-none whitespace-pre"
+                            className="fixed z-10 bg-transparent outline-none resize-none overflow-hidden border-none whitespace-pre"
                             style={style}
                             value={textValue}
                             onChange={(e) => {
@@ -1107,12 +1144,16 @@ const EditorPage = () => {
                                 if (isFrame) {
                                     updateElements(elements.map(item => item.id === el.id ? { ...item, name: val } : item));
                                 } else {
+                                    // Fix: Trim trailing newline for measurement to prevent ghost lines? 
+                                    // Actually, just measure EXACTLY what we have.
+                                    // Renderer uses 1.25 line height.
                                     const metrics = measureText(val, el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle);
                                     updateElements(elements.map(item => item.id === el.id ? { ...item, text: val, width: metrics.width, height: metrics.height } : item));
                                 }
                             }}
-                            onBlur={() => setAppState(prev => ({ ...prev, editingElementId: null }))}
+                            onBlur={handleTextBlur}
                             autoFocus
+                            spellCheck={false}
                         />
                     );
                 }
@@ -1133,10 +1174,8 @@ const EditorPage = () => {
                 undo={undo}
                 redo={redo}
                 clearCanvas={() => {
-                    if (window.confirm('Are you sure you want to clear the canvas?')) {
-                        setElements([]);
-                        clearHistory();
-                    }
+                    setElements([]);
+                    clearHistory();
                 }}
                 openGemini={() => setIsGeminiOpen(true)}
                 onLayerChange={handleLayerChange}
@@ -1146,23 +1185,22 @@ const EditorPage = () => {
                 onToggleLock={handleToggleLock}
             />
 
-            <div className="fixed top-6 right-6 z-50 flex gap-2">
-                <button
-                    onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}
-                    className="p-2.5 bg-white/40 dark:bg-black/40 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-white/60 dark:hover:bg-white/20 transition-all shadow-sm"
-                >
-                    {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-                </button>
+            {/* --- Zoom Indicator (Bottom Left) --- */}
+            <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-white/40 dark:bg-black/40 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-lg shadow-sm text-xs font-medium text-gray-600 dark:text-gray-300">
+                    <button
+                        className="hover:text-violet-500 font-bold"
+                        onClick={() => setAppState(s => ({ ...s, zoom: Math.max(0.1, s.zoom - 0.1) }))}
+                    >-</button>
+                    <span className="w-8 text-center">{Math.round(appState.zoom * 100)}%</span>
+                    <button
+                        className="hover:text-violet-500 font-bold"
+                        onClick={() => setAppState(s => ({ ...s, zoom: Math.min(5, s.zoom + 0.1) }))}
+                    >+</button>
+                </div>
             </div>
 
-            <button
-                onClick={() => setIsHelpOpen(true)}
-                className="fixed bottom-6 right-6 z-50 p-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95"
-                title="Help & Shortcuts (?)"
-            >
-                <HelpCircle size={24} />
-            </button>
-
+            {/* Existing Dialogs/Modals */}
             <IconLibrary
                 isOpen={isLibraryOpen}
                 onClose={() => setIsLibraryOpen(false)}

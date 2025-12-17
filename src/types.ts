@@ -39,24 +39,24 @@ export interface ExcalidrawElement {
   strokeColor: string;
   backgroundColor: string;
   strokeWidth: number;
-  strokeStyle: StrokeStyle; 
+  strokeStyle: StrokeStyle;
   opacity: number;
-  points?: Point[]; 
-  text?: string;    
+  points?: Point[];
+  text?: string;
   fontSize?: number;
-  fontFamily?: number; 
-  fontWeight?: number; 
-  fontStyle?: string; 
+  fontFamily?: number;
+  fontWeight?: number;
+  fontStyle?: string;
   textAlign?: TextAlign;
   isSelected?: boolean;
   startBinding?: Binding;
   endBinding?: Binding;
-  groupIds?: string[]; 
+  groupIds?: string[];
   isLocked?: boolean;
-  frameId?: string; 
-  name?: string; 
+  frameId?: string;
+  name?: string;
   // Icon specific properties
-  iconPath?: string; 
+  iconPath?: string;
 }
 
 export type ResizeHandle = 'n' | 's' | 'w' | 'e' | 'nw' | 'ne' | 'sw' | 'se' | string;
@@ -72,13 +72,14 @@ export interface AppState {
   tool: ToolType;
   strokeColor: string;
   backgroundColor: string;
+  viewBackgroundColor: string;
   strokeWidth: number;
-  strokeStyle: StrokeStyle; 
+  strokeStyle: StrokeStyle;
   opacity: number;
   pan: { x: number; y: number };
   zoom: number;
   isDragging: boolean;
-  selectionStart: Point | null; 
+  selectionStart: Point | null;
   selectionBox: { x: number; y: number; width: number; height: number } | null;
   selectedElementIds: string[];
   editingElementId: string | null;
