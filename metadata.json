@@ -1,0 +1,7 @@
+{
+  "name": "GeminiDraw",
+  "description": "A powerful, AI-enhanced whiteboard and diagramming tool inspired by Excalidraw. Features include shape tools, free drawing, infinite canvas, and Gemini-powered diagram generation.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

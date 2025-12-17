@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+body {
+    margin: 0;
+    overflow: hidden;
+}
+
+.font-hand {
+    font-family: "Kalam", cursive;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 20px;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #475569;
+}
