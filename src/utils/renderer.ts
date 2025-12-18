@@ -1,6 +1,7 @@
+import React, { useEffect, useRef } from 'react';
 import rough from 'roughjs';
-import { ExcalidrawElement, Point, ResizeHandle } from "../types";
-import { getSnapPoints, getResizeHandles, getConnectorHandles } from "./geometry";
+import { ExcalidrawElement, Point, ResizeHandle, AppState } from "../types";
+import { getSnapPoints, getResizeHandles, getConnectorHandles, getAnchorPosition } from "./geometry";
 
 export const getFontFamilyString = (fontFamily?: number) => {
     switch (fontFamily) {
@@ -167,54 +168,25 @@ const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement) => 
     });
 };
 
-export const renderScene = (
+const drawElements = (
     ctx: CanvasRenderingContext2D,
     elements: ExcalidrawElement[],
-    pan: { x: number; y: number },
-    zoom: number,
-    selectionIds: string[] = [],
-    highlightedElementId: string | null = null,
-    selectionBox: { x: number; y: number; width: number; height: number } | null = null,
-    laserTrails: { x: number; y: number; time: number }[][] = [],
-    editingElementId: string | null = null,
-    showSnapPoints: boolean = false,
-    theme: 'light' | 'dark' = 'light',
-    showGrid: boolean = true,
-    padding: number = 0,
-    backgroundColor?: string
+    theme: 'light' | 'dark',
+    pendingDeletionIds: string[] = [],
+    editingElementId: string | null = null
 ) => {
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
-    if (backgroundColor && backgroundColor !== 'transparent') {
-        ctx.fillStyle = backgroundColor;
-        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    }
-
-    drawGrid(ctx, ctx.canvas.width, ctx.canvas.height, pan, zoom, theme, showGrid);
-
-    if (elements.length === 0) {
-        drawWelcomeScreen(ctx, ctx.canvas.width / (window.devicePixelRatio || 1), ctx.canvas.height / (window.devicePixelRatio || 1), theme);
-    }
-    ctx.restore();
-
-    ctx.save(); // Main transform context
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
-
     const rc = rough.canvas(ctx.canvas);
     const frameMap = new Map<string, ExcalidrawElement>();
     elements.forEach(el => {
         if (el.type === 'frame') frameMap.set(el.id, el);
     });
 
-    // 1. Draw Elements
     elements.forEach(element => {
         if (editingElementId === element.id && element.type === 'text') return;
 
-        ctx.save(); // Element transform context
-        ctx.globalAlpha = element.opacity / 100;
+        const isPendingDeletion = pendingDeletionIds.includes(element.id);
+        ctx.save();
+        ctx.globalAlpha = isPendingDeletion ? 0.2 : element.opacity / 100;
 
         // Clip to frame
         if (element.frameId) {
@@ -242,10 +214,8 @@ export const renderScene = (
 
         if (theme === 'dark') {
             if (adaptiveStrokeColor === '#000000' || adaptiveStrokeColor === 'black') adaptiveStrokeColor = '#ffffff';
-            // Only adapt white background to dark gray if it was "white"
             if (adaptiveBackgroundColor === '#ffffff' || adaptiveBackgroundColor === 'white') adaptiveBackgroundColor = '#121212';
         } else {
-            // In light mode, ensure white strokes are visible
             if (adaptiveStrokeColor === '#ffffff' || adaptiveStrokeColor === 'white') adaptiveStrokeColor = '#000000';
         }
 
@@ -257,8 +227,8 @@ export const renderScene = (
             fillStyle: element.fillStyle || 'hachure',
             fillWeight: element.strokeWidth / 2,
             hachureGap: 4,
-            roughness: 0.5, // Cleaner look
-            bowing: 1.5,   // More organic curved lines
+            roughness: element.roughness ?? 0.5,
+            bowing: 1.5,
             strokeLineDash: element.strokeStyle === 'dashed' ? [element.strokeWidth * 4, element.strokeWidth * 4] :
                 element.strokeStyle === 'dotted' ? [element.strokeWidth, element.strokeWidth * 2] : undefined
         };
@@ -296,9 +266,9 @@ export const renderScene = (
             else ctx.rect(element.x, element.y, element.width, element.height);
             ctx.stroke();
             if (element.name) {
-                ctx.font = `bold ${14 / zoom}px "Inter", sans-serif`;
+                ctx.font = `bold 14px "Inter", sans-serif`;
                 ctx.fillStyle = frameColor;
-                ctx.fillText(element.name, element.x, element.y - (12 / zoom));
+                ctx.fillText(element.name, element.x, element.y - 12);
             }
             ctx.restore();
         } else if (element.type === 'ellipse') {
@@ -340,17 +310,84 @@ export const renderScene = (
             ctx.textBaseline = "middle";
             ctx.fillText(element.iconName || "?", element.x + element.width / 2, element.y + element.height / 2);
         }
-
-        ctx.restore(); // Element transform context
+        ctx.restore();
     });
+};
+
+export const renderStaticScene = (
+    ctx: CanvasRenderingContext2D,
+    elements: ExcalidrawElement[],
+    pan: { x: number; y: number },
+    zoom: number,
+    theme: 'light' | 'dark' = 'light',
+    showGrid: boolean = true,
+    backgroundColor?: string
+) => {
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+    if (backgroundColor && backgroundColor !== 'transparent') {
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    }
+
+    drawGrid(ctx, ctx.canvas.width, ctx.canvas.height, pan, zoom, theme, showGrid);
+
+    if (elements.length === 0) {
+        drawWelcomeScreen(ctx, ctx.canvas.width / dpr, ctx.canvas.height / dpr, theme);
+    }
+
+    // Apply DPR, then pan and zoom
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
+
+    drawElements(ctx, elements, theme);
+
+    ctx.restore();
+};
+
+export const renderDynamicScene = (
+    ctx: CanvasRenderingContext2D,
+    elements: ExcalidrawElement[],
+    tempElement: ExcalidrawElement | null,
+    appState: AppState,
+    theme: 'light' | 'dark' = 'light',
+    highlightedElementId: string | null = null,
+    laserTrails: { x: number; y: number; time: number }[][] = [],
+    eraserTrail: { x: number, y: number }[] = [],
+    cursorPos: Point | null = null
+) => {
+    const { pan, zoom, selectionBox, editingElementId, pendingDeletionIds } = appState;
+    // Note: selectionIds doesn't exist on AppState in previous view, it was selectedElementIds.
+    // Let's use the actual names from types.ts.
+    const selIds = appState.selectedElementIds || [];
+
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+    // Apply DPR, then pan and zoom
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
+
+    // 1. Draw Temp Element (Active Drawing)
+    if (tempElement) {
+        drawElements(ctx, [tempElement], theme, [], editingElementId);
+    }
 
     // 2. Draw Selection Overlays
     elements.forEach(element => {
-        const isSelected = selectionIds.includes(element.id);
+        const isSelected = selIds.includes(element.id);
         const isHighlighted = highlightedElementId === element.id;
         const isBeingEdited = editingElementId === element.id;
 
-        // Skip selection UI for elements being edited
         if ((isSelected || isHighlighted) && !isBeingEdited) {
             ctx.save();
             const selectionColor = isSelected ? "#6965db" : "rgba(105, 101, 219, 0.4)";
@@ -358,7 +395,6 @@ export const renderScene = (
             ctx.strokeStyle = selectionColor;
             ctx.lineWidth = 1 / zoom;
 
-            // 1. Draw Selection Outline
             ctx.save();
             if (element.angle) {
                 const cx = element.x + element.width / 2;
@@ -376,27 +412,20 @@ export const renderScene = (
             ctx.stroke();
             ctx.restore();
 
-            // 2. Draw Handles for single selection
-            if (isSelected && selectionIds.length === 1 && !element.isLocked) {
+            if (isSelected && selIds.length === 1 && !element.isLocked) {
                 const handles = getResizeHandles(element, zoom);
                 const connectors = getConnectorHandles(element, zoom);
                 const handleSize = 8 / zoom;
 
-                // --- 2.1 Draw Connector Handles ---
                 ctx.save();
                 for (const [key, p] of Object.entries(connectors)) {
-                    // Outer circle (White)
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 7 / zoom, 0, Math.PI * 2);
                     ctx.fillStyle = "#ffffff";
                     ctx.fill();
-
-                    // Border
                     ctx.strokeStyle = selectionColor;
                     ctx.lineWidth = 1.2 / zoom;
                     ctx.stroke();
-
-                    // Inner "+" icon
                     ctx.beginPath();
                     ctx.strokeStyle = selectionColor;
                     ctx.lineWidth = 1 / zoom;
@@ -409,25 +438,22 @@ export const renderScene = (
                 }
                 ctx.restore();
 
-                // --- 2.2 Draw Resize Handles ---
                 Object.entries(handles).forEach(([key, pos]) => {
                     ctx.save();
                     const hx = pos.x;
                     const hy = pos.y;
 
                     if (key === 'rotation') {
-                        // Rotation Handle (Thin connector + empty circle)
                         const nHandle = handles['n'];
                         if (nHandle) {
                             ctx.setLineDash([4 / zoom, 4 / zoom]);
                             ctx.beginPath();
                             ctx.moveTo(nHandle.x, nHandle.y);
                             ctx.lineTo(hx, hy);
-                            ctx.strokeStyle = selectionColor; // Ensure selection color
+                            ctx.strokeStyle = selectionColor;
                             ctx.globalAlpha = 0.5;
                             ctx.stroke();
                         }
-
                         ctx.beginPath();
                         ctx.fillStyle = handleFillColor;
                         ctx.strokeStyle = selectionColor;
@@ -438,7 +464,6 @@ export const renderScene = (
                         ctx.stroke();
                     } else {
                         if (key.startsWith('p:') || key.startsWith('m:')) {
-                            // Point or Mid-point handles
                             const isMid = key.startsWith('m:');
                             ctx.beginPath();
                             if (isMid) {
@@ -455,7 +480,6 @@ export const renderScene = (
                                 ctx.stroke();
                             }
                         } else {
-                            // Standard corner/side handles
                             ctx.fillStyle = handleFillColor;
                             ctx.strokeStyle = selectionColor;
                             ctx.lineWidth = 1 / zoom;
@@ -483,26 +507,7 @@ export const renderScene = (
         }
     });
 
-    // 3. Highlight Snap Points
-    if (highlightedElementId && showSnapPoints) {
-        const element = elements.find(el => el.id === highlightedElementId);
-        if (element && !element.isLocked && !selectionIds.includes(element.id)) {
-            const snapPoints = getSnapPoints(element);
-            ctx.save();
-            ctx.fillStyle = "#a855f7";
-            ctx.strokeStyle = "#ffffff";
-            ctx.lineWidth = 2 / zoom;
-            snapPoints.forEach(p => {
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.stroke();
-            });
-            ctx.restore();
-        }
-    }
-
-    // 4. Selection Box (Multi-select)
+    // 3. Selection Box
     if (selectionBox) {
         ctx.save();
         ctx.fillStyle = "rgba(139, 92, 246, 0.1)";
@@ -510,6 +515,42 @@ export const renderScene = (
         ctx.lineWidth = 1 / zoom;
         ctx.fillRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
         ctx.strokeRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
+        ctx.restore();
+    }
+
+    // 4. Eraser Trail
+    if (eraserTrail.length > 2) {
+        ctx.save();
+        ctx.beginPath();
+        const baseWidth = 8 / zoom;
+        ctx.fillStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)';
+        for (let i = 0; i < eraserTrail.length - 1; i++) {
+            const p1 = eraserTrail[i];
+            const p2 = eraserTrail[i + 1];
+            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            if (dist < 0.1) continue;
+            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const progress = i / eraserTrail.length;
+            const taper = Math.sin(progress * Math.PI);
+            const w = baseWidth * taper;
+            const dx = Math.cos(angle + Math.PI / 2) * w;
+            const dy = Math.sin(angle + Math.PI / 2) * w;
+            if (i === 0) ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p1.x + dx, p1.y + dy);
+        }
+        for (let i = eraserTrail.length - 1; i >= 0; i--) {
+            const p1 = eraserTrail[i];
+            const p2 = eraserTrail[Math.max(0, i - 1)];
+            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const progress = i / eraserTrail.length;
+            const taper = Math.sin(progress * Math.PI);
+            const w = baseWidth * taper;
+            const dx = Math.cos(angle + Math.PI / 2) * w;
+            const dy = Math.sin(angle + Math.PI / 2) * w;
+            ctx.lineTo(p1.x - dx, p1.y - dy);
+        }
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
     }
 
@@ -536,7 +577,45 @@ export const renderScene = (
         ctx.restore();
     }
 
-    ctx.restore(); // Main transform context
+    // 6. Eraser Cursor
+    if (appState.tool === 'eraser' && cursorPos) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cursorPos.x, cursorPos.y, 4 / zoom, 0, Math.PI * 2);
+        ctx.strokeStyle = theme === 'dark' ? '#ffffff' : '#000000';
+        ctx.lineWidth = 1 / zoom;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    ctx.restore();
+};
+
+// Keep existing helper (might need update later)
+export const renderScene = (
+    ctx: CanvasRenderingContext2D,
+    elements: ExcalidrawElement[],
+    pan: { x: number; y: number },
+    zoom: number,
+    selectionIds: string[] = [],
+    highlightedElementId: string | null = null,
+    selectionBox: { x: number; y: number; width: number; height: number } | null = null,
+    laserTrails: { x: number; y: number; time: number }[][] = [],
+    editingElementId: string | null = null,
+    showSnapPoints: boolean = false,
+    theme: 'light' | 'dark' = 'light',
+    showGrid: boolean = true,
+    padding: number = 0,
+    backgroundColor?: string,
+    eraserTrail: { x: number, y: number }[] = [],
+    eraserSize: number = 20,
+    cursorPos: Point | null = null,
+    tool: string = "",
+    pendingDeletionIds: string[] = []
+) => {
+    // Legacy support for exportToCanvas
+    renderStaticScene(ctx, elements, pan, zoom, theme, showGrid, backgroundColor);
+    // This is not perfect as it doesn't draw overlays, but for export it's usually what we want.
 };
 
 export const exportToCanvas = (
@@ -582,7 +661,11 @@ export const exportToCanvas = (
         options.theme || 'light',
         false, // No grid
         0,
-        options.exportBackground ? options.viewBackgroundColor : 'transparent'
+        options.exportBackground ? options.viewBackgroundColor : 'transparent',
+        [], // eraserTrail
+        20, // eraserSize
+        null, // cursorPos
+        "" // tool
     );
 
     return canvas;

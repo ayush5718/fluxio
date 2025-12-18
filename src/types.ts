@@ -59,6 +59,7 @@ export interface ExcalidrawElement {
   fillStyle?: "hachure" | "cross-hatch" | "solid" | "hollow";
   angle?: number;
   roundness?: number;
+  roughness?: number;
   // Icon specific properties
   iconPath?: string;
 }
@@ -89,6 +90,9 @@ export interface AppState {
   editingElementId: string | null;
   resizingState: ResizingState | null;
   fillStyle: "hachure" | "cross-hatch" | "solid" | "hollow";
+  roughness: number;
+  eraserSize: number; // For adjustable eraser thickness
+  pendingDeletionIds: string[]; // Elements marked for deletion during erase
   showGrid: boolean;
   snapToGrid: boolean;
 }

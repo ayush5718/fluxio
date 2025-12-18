@@ -1,8 +1,16 @@
 
+import React from 'react';
 import { ExcalidrawElement, Point, AnchorPosition, ResizeHandle } from "../types";
 import { measureText } from "./renderer";
 
 // --- Geometry Utils ---
+
+export const getPointerPos = (e: React.MouseEvent | MouseEvent | { clientX: number, clientY: number }, pan: { x: number, y: number }, zoom: number): Point => {
+    return {
+        x: (e.clientX - pan.x) / zoom,
+        y: (e.clientY - pan.y) / zoom
+    };
+};
 
 export const getElementBounds = (element: ExcalidrawElement) => {
     return {
@@ -78,13 +86,17 @@ export const getDistance = (p1: Point, p2: Point) => {
     return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 };
 
-const distanceToSegment = (p: Point, a: Point, b: Point) => {
+export const distanceToSegment = (p: Point, a: Point, b: Point) => {
     const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
     if (l2 === 0) return getDistance(p, a);
     let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
     t = Math.max(0, Math.min(1, t));
     const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
     return getDistance(p, proj);
+};
+
+export const isPointInRadius = (p: Point, center: Point, radius: number) => {
+    return getDistance(p, center) <= radius;
 };
 
 export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stroke' | 'fill' | null => {
@@ -292,7 +304,7 @@ export const getSmartAnchors = (e1: ExcalidrawElement, e2: ExcalidrawElement): {
     return { start: 'top', end: 'bottom' };
 };
 
-const simplifyPoints = (pts: Point[]) => {
+export const simplifyPoints = (pts: Point[]) => {
     if (pts.length < 3) return pts;
     const res = [pts[0]];
     for (let i = 1; i < pts.length - 1; i++) {
@@ -303,6 +315,31 @@ const simplifyPoints = (pts: Point[]) => {
     }
     res.push(pts[pts.length - 1]);
     return res;
+};
+
+export const splitPathAtRadius = (element: ExcalidrawElement, eraserPos: Point, radius: number): Point[][] => {
+    if (!element.points || element.points.length < 2) return [];
+
+    const results: Point[][] = [];
+    let currentPath: Point[] = [];
+
+    for (let i = 0; i < element.points.length; i++) {
+        const pAbs = { x: element.x + element.points[i].x, y: element.y + element.points[i].y };
+        if (getDistance(pAbs, eraserPos) > radius) {
+            currentPath.push(element.points[i]);
+        } else {
+            if (currentPath.length > 0) {
+                results.push(currentPath);
+                currentPath = [];
+            }
+        }
+    }
+
+    if (currentPath.length > 0) {
+        results.push(currentPath);
+    }
+
+    return results.filter(p => p.length >= 2);
 };
 
 export const generateOrthogonalPoints = (start: Point, end: Point, sa: AnchorPosition, ea: AnchorPosition, b1: any, b2: any, pad: number = 20): Point[] => {
