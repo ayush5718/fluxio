@@ -309,10 +309,94 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 const elementsToMove = elements.filter(el => !el.isLocked && (selectedIds.has(el.id) || (el.frameId && selectedIds.has(el.frameId))));
                 const moveIds = new Set(elementsToMove.map(e => e.id));
 
-                const updated = elements.map(el => {
+                // First, move the selected elements
+                let updated = elements.map(el => {
                     if (moveIds.has(el.id)) return { ...el, x: el.x + dx, y: el.y + dy };
                     return el;
                 });
+
+                // Then, update any arrows bound to moved elements
+                updated = updated.map(el => {
+                    if (el.type !== 'arrow' && el.type !== 'line') return el;
+                    if (!el.points || el.points.length < 2) return el;
+
+                    const hasStartBinding = el.startBinding && moveIds.has(el.startBinding.elementId);
+                    const hasEndBinding = el.endBinding && moveIds.has(el.endBinding.elementId);
+
+                    if (!hasStartBinding && !hasEndBinding) return el;
+
+                    let newEl = { ...el, points: [...el.points] };
+
+                    // Get bound elements
+                    const startBoundEl = el.startBinding ? updated.find(e => e.id === el.startBinding!.elementId) : null;
+                    const endBoundEl = el.endBinding ? updated.find(e => e.id === el.endBinding!.elementId) : null;
+
+                    // Calculate anchor positions
+                    let startPos = { x: el.x, y: el.y };
+                    let endPos = { x: el.x + el.points[el.points.length - 1].x, y: el.y + el.points[el.points.length - 1].y };
+
+                    if (startBoundEl && el.startBinding) {
+                        startPos = getAnchorPosition(startBoundEl, el.startBinding.anchor);
+                    }
+                    if (endBoundEl && el.endBinding) {
+                        endPos = getAnchorPosition(endBoundEl, el.endBinding.anchor);
+                    }
+
+                    // If both ends are bound, use smart routing with dynamic anchors
+                    if (startBoundEl && endBoundEl && el.startBinding && el.endBinding) {
+                        // Dynamically recalculate optimal anchors
+                        const smartAnchors = getSmartAnchors(startBoundEl, endBoundEl);
+
+                        // Update bindings with optimal anchors
+                        newEl.startBinding = { ...el.startBinding, anchor: smartAnchors.start };
+                        newEl.endBinding = { ...el.endBinding, anchor: smartAnchors.end };
+
+                        const startPos = getAnchorPosition(startBoundEl, smartAnchors.start);
+                        const endPos = getAnchorPosition(endBoundEl, smartAnchors.end);
+
+                        // Use orthogonal elbow routing with smart anchors
+                        const newPoints = generateOrthogonalPoints(
+                            startPos,
+                            endPos,
+                            smartAnchors.start as any,
+                            smartAnchors.end as any,
+                            startBoundEl,
+                            endBoundEl,
+                            30
+                        );
+                        newEl.x = startPos.x;
+                        newEl.y = startPos.y;
+                        newEl.points = newPoints;
+                    } else {
+                        // Only one end bound - simple update
+                        if (hasStartBinding && startBoundEl) {
+                            const oldStart = { x: el.x, y: el.y };
+                            const offsetX = startPos.x - oldStart.x;
+                            const offsetY = startPos.y - oldStart.y;
+                            newEl.x = startPos.x;
+                            newEl.y = startPos.y;
+                            newEl.points = newEl.points.map((p, i) =>
+                                i === 0 ? { x: 0, y: 0 } : { x: p.x - offsetX, y: p.y - offsetY }
+                            );
+                        }
+                        if (hasEndBinding) {
+                            const endPointIdx = newEl.points.length - 1;
+                            newEl.points[endPointIdx] = {
+                                x: endPos.x - newEl.x,
+                                y: endPos.y - newEl.y
+                            };
+                        }
+                    }
+
+                    // Recalculate width/height based on points
+                    const xs = newEl.points.map(p => p.x);
+                    const ys = newEl.points.map(p => p.y);
+                    newEl.width = Math.max(...xs) - Math.min(...xs);
+                    newEl.height = Math.max(...ys) - Math.min(...ys);
+
+                    return newEl;
+                });
+
                 setElements(updated);
                 setAppState(prev => ({ ...prev, selectionStart: pos }));
                 return;
@@ -325,10 +409,31 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 if (tempElement.type === 'arrow' || tempElement.type === 'line') {
                     const points = [...(tempElement.points || [{ x: 0, y: 0 }])];
                     if (points.length < 2) points.push({ x: 0, y: 0 });
-                    if (hoveredEl) {
-                        const snap = getClosestSnapPoint(pos.x, pos.y, hoveredEl);
-                        if (snap) { width = snap.x - tempElement.x; height = snap.y - tempElement.y; }
+
+                    // Calculate the arrow tip position
+                    const tipX = tempElement.x + width;
+                    const tipY = tempElement.y + height;
+
+                    // Find element at arrow tip, excluding the source element
+                    const sourceElementId = tempElement.startBinding?.elementId;
+                    const targetEl = elements.find(el => {
+                        if (el.id === sourceElementId) return false;
+                        if (el.isLocked) return false;
+                        const hit = hitTest(tipX, tipY, el);
+                        return hit === 'stroke' || (hit === 'fill' && el.backgroundColor !== 'transparent');
+                    });
+
+                    if (targetEl) {
+                        setHighlightedElementId(targetEl.id);
+                        const snap = getClosestSnapPoint(tipX, tipY, targetEl);
+                        if (snap) {
+                            width = snap.x - tempElement.x;
+                            height = snap.y - tempElement.y;
+                        }
+                    } else {
+                        setHighlightedElementId(null);
                     }
+
                     points[points.length - 1] = { x: width, y: height };
                     setTempElement({ ...tempElement, width, height, points });
                 } else if (tempElement.type === 'freedraw') {
@@ -360,6 +465,24 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 setTempElement(null);
             } else {
                 let final = { ...tempElement };
+
+                // Set endBinding if arrow/line released over an element
+                if ((final.type === 'arrow' || final.type === 'line') && final.points && final.points.length >= 2) {
+                    const endPoint = final.points[final.points.length - 1];
+                    const endX = final.x + endPoint.x;
+                    const endY = final.y + endPoint.y;
+                    const hoveredEl = getElementAtPosition(endX, endY, elements);
+                    if (hoveredEl && hoveredEl.id !== final.startBinding?.elementId) {
+                        const snap = getClosestSnapPoint(endX, endY, hoveredEl);
+                        if (snap) {
+                            final.endBinding = { elementId: hoveredEl.id, anchor: snap.anchor };
+                            // Adjust the end point to snap to the anchor
+                            final.points = [...final.points];
+                            final.points[final.points.length - 1] = { x: snap.x - final.x, y: snap.y - final.y };
+                        }
+                    }
+                }
+
                 let nextElements = [...elements, final];
 
                 if (final.type === 'frame') {

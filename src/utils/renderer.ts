@@ -503,6 +503,24 @@ export const renderDynamicScene = (
             if (element.isLocked) {
                 drawLockIcon(ctx, element.x + element.width / 2, element.y + element.height / 2, 20 / zoom);
             }
+
+            // Draw snap points for highlighted elements (during arrow/line drawing)
+            if (isHighlighted && !isSelected) {
+                const snapPoints = getSnapPoints(element);
+                ctx.save();
+                snapPoints.forEach(sp => {
+                    ctx.beginPath();
+                    ctx.arc(sp.x, sp.y, 6 / zoom, 0, Math.PI * 2);
+                    ctx.fillStyle = '#6965db';
+                    ctx.globalAlpha = 0.8;
+                    ctx.fill();
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5 / zoom;
+                    ctx.stroke();
+                });
+                ctx.restore();
+            }
+
             ctx.restore();
         }
     });

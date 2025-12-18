@@ -343,6 +343,35 @@ export const splitPathAtRadius = (element: ExcalidrawElement, eraserPos: Point, 
 };
 
 export const generateOrthogonalPoints = (start: Point, end: Point, sa: AnchorPosition, ea: AnchorPosition, b1: any, b2: any, pad: number = 20): Point[] => {
+    // Tolerance for alignment detection (in pixels)
+    const ALIGN_TOLERANCE = 40;
+
+    // Check if shapes are roughly aligned - use straight line in this case
+    const dx = Math.abs(end.x - start.x);
+    const dy = Math.abs(end.y - start.y);
+
+    // Horizontal alignment: start and end are on same horizontal plane
+    const isHorizontallyAligned = dy < ALIGN_TOLERANCE;
+    // Vertical alignment: start and end are on same vertical plane  
+    const isVerticallyAligned = dx < ALIGN_TOLERANCE;
+
+    // Direct horizontal connection (right->left or left->right)
+    if (isHorizontallyAligned && ((sa === 'right' && ea === 'left') || (sa === 'left' && ea === 'right'))) {
+        return [
+            { x: 0, y: 0 },
+            { x: end.x - start.x, y: end.y - start.y }
+        ];
+    }
+
+    // Direct vertical connection (bottom->top or top->bottom)
+    if (isVerticallyAligned && ((sa === 'bottom' && ea === 'top') || (sa === 'top' && ea === 'bottom'))) {
+        return [
+            { x: 0, y: 0 },
+            { x: end.x - start.x, y: end.y - start.y }
+        ];
+    }
+
+    // Otherwise use elbow routing
     const breakout = (p: Point, a: AnchorPosition, pd: number) => {
         switch (a) { case 'top': return { x: p.x, y: p.y - pd }; case 'bottom': return { x: p.x, y: p.y + pd }; case 'left': return { x: p.x - pd, y: p.y }; case 'right': return { x: p.x + pd, y: p.y }; default: return p; }
     };
