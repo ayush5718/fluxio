@@ -20,6 +20,7 @@ export type TextAlign = "left" | "center" | "right";
 export interface Point {
   x: number;
   y: number;
+  pressure?: number;
 }
 
 export type AnchorPosition = 'top' | 'right' | 'bottom' | 'left' | 'center';
@@ -60,6 +61,8 @@ export interface ExcalidrawElement {
   angle?: number;
   roundness?: number;
   roughness?: number;
+  simulatePressure?: boolean;
+  iconName?: string;
   // Icon specific properties
   iconPath?: string;
 }
@@ -95,6 +98,7 @@ export interface AppState {
   pendingDeletionIds: string[]; // Elements marked for deletion during erase
   showGrid: boolean;
   snapToGrid: boolean;
+  draggingOffset: Point | null;
 }
 
 export const TOOLS: { id: ToolType; icon: string; label: string; shortcut: string }[] = [

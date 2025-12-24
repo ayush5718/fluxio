@@ -11,10 +11,10 @@ interface CanvasContainerProps {
     laserTrails: { x: number; y: number; time: number }[][];
     eraserTrail: Point[];
     cursorPos: Point | null;
-    handleMouseDown: (e: React.MouseEvent) => void;
-    handleMouseMove: (e: React.MouseEvent) => void;
-    handleMouseUp: (e: React.MouseEvent) => void;
-    handleDoubleClick: (e: React.MouseEvent) => void;
+    handleMouseDown: (e: React.PointerEvent) => void;
+    handleMouseMove: (e: React.PointerEvent) => void;
+    handleMouseUp: (e: React.PointerEvent) => void;
+    handleDoubleClick: (e: React.PointerEvent) => void;
     handleContextMenu: (e: React.MouseEvent) => void;
 }
 
@@ -38,9 +38,9 @@ const CanvasContainer: React.FC<CanvasContainerProps> = (props) => {
             />
             <canvas
                 ref={dynamicCanvasRef}
-                onMouseDown={props.handleMouseDown}
-                onMouseMove={props.handleMouseMove}
-                onMouseUp={props.handleMouseUp}
+                onPointerDown={props.handleMouseDown}
+                onPointerMove={props.handleMouseMove}
+                onPointerUp={props.handleMouseUp}
                 onDoubleClick={props.handleDoubleClick}
                 onContextMenu={props.handleContextMenu}
                 style={{

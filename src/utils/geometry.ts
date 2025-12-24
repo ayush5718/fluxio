@@ -155,6 +155,20 @@ export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stro
     return isStroke ? 'stroke' : isFill ? 'fill' : null;
 };
 
+export const isPointInElementBounds = (x: number, y: number, element: ExcalidrawElement) => {
+    const { x: ex, y: ey, width, height, angle = 0 } = element;
+    let px = x, py = y;
+    if (angle !== 0) {
+        const center = { x: ex + width / 2, y: ey + height / 2 };
+        const rotated = rotatePoint({ x, y }, center, -angle);
+        px = rotated.x; py = rotated.y;
+    }
+    const nx = width < 0 ? ex + width : ex, ny = height < 0 ? ey + height : ey, nw = Math.abs(width), nh = Math.abs(height);
+    // Add a small padding for easier grabbing
+    const padding = 2;
+    return px >= nx - padding && px <= nx + nw + padding && py >= ny - padding && py <= ny + nh + padding;
+};
+
 export const getElementAtPosition = (x: number, y: number, elements: ExcalidrawElement[]) => {
     for (let i = elements.length - 1; i >= 0; i--) {
         const element = elements[i];

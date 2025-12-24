@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import rough from 'roughjs';
+import { getStroke } from 'perfect-freehand';
 import { ExcalidrawElement, Point, ResizeHandle, AppState } from "../types";
-import { getSnapPoints, getResizeHandles, getConnectorHandles, getAnchorPosition } from "./geometry";
+import { getSnapPoints, getResizeHandles, getConnectorHandles, getAnchorPosition, getSmartAnchors, generateOrthogonalPoints } from "./geometry";
 
 export const getFontFamilyString = (fontFamily?: number) => {
     switch (fontFamily) {
@@ -144,7 +145,7 @@ const drawWelcomeScreen = (ctx: CanvasRenderingContext2D, width: number, height:
     ctx.restore();
 };
 
-const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement) => {
+const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement, x: number, y: number) => {
     const fontSize = element.fontSize || 20;
     const font = getFontString({
         fontSize,
@@ -164,46 +165,178 @@ const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement) => 
         let xOffset = 0;
         if (element.textAlign === 'center') xOffset = (element.width - lineWidth) / 2;
         else if (element.textAlign === 'right') xOffset = element.width - lineWidth;
-        ctx.fillText(line, element.x + xOffset, element.y + index * lineHeight);
+        ctx.fillText(line, x + xOffset, y + index * lineHeight);
     });
+};
+
+// Cache for RoughJS drawables to avoid recalculating geometry on every frame
+const drawableCache = new Map<string, any>();
+
+const getEraserOptions = (element: ExcalidrawElement) => {
+    return {
+        seed: element.seed,
+        stroke: "#000000",
+        strokeWidth: element.strokeWidth,
+        roughness: element.roughness ?? 0.5,
+        bowing: 1.5,
+    };
+};
+
+const getSvgPathFromStroke = (stroke: number[][]) => {
+    if (!stroke.length) return "";
+    const d = stroke.reduce(
+        (acc, [x0, y0], i, arr) => {
+            const [x1, y1] = arr[(i + 1) % arr.length];
+            acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+            return acc;
+        },
+        ["M", ...stroke[0], "Q"]
+    );
+    d.push("Z");
+    return d.join(" ");
+};
+
+const getElementDrawable = (rc: any, element: ExcalidrawElement, options: any) => {
+    // Create a stable cache key based on geometry and visual properties
+    let key = `${element.type}-${element.seed}-${element.width}-${element.height}-${element.strokeWidth}-${element.strokeStyle}-${element.fillStyle}-${element.roughness}-${options.stroke}-${options.fill}`;
+
+    // For path-based elements, include points in the key
+    if (element.points && element.points.length > 0) {
+        // Just Use first, middle, last and length for quick hashing
+        const len = element.points.length;
+        const mid = element.points[Math.floor(len / 2)];
+        const last = element.points[len - 1];
+        key += `-${len}-${element.points[0].x},${element.points[0].y}-${mid.x},${mid.y}-${last.x},${last.y}`;
+    }
+
+    if (drawableCache.has(key)) return drawableCache.get(key);
+
+    let drawable: any = null;
+    if (element.type === 'rectangle') {
+        const r = element.roundness || 0;
+        if (r > 0) {
+            const { x, y, width: w, height: h } = element;
+            const path = `M ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${h - r} A ${r} ${r} 0 0 1 ${w - r} ${h} L ${r} ${h} A ${r} ${r} 0 0 1 0 ${h - r} L 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`;
+            drawable = rc.generator.path(path, options);
+        } else {
+            drawable = rc.generator.rectangle(0, 0, element.width, element.height, options);
+        }
+    } else if (element.type === 'ellipse') {
+        drawable = rc.generator.ellipse(element.width / 2, element.height / 2, element.width, element.height, options);
+    } else if (element.type === 'diamond') {
+        drawable = rc.generator.polygon([
+            [element.width / 2, 0],
+            [element.width, element.height / 2],
+            [element.width / 2, element.height],
+            [0, element.height / 2]
+        ], options);
+    } else if (element.type === 'arrow' || element.type === 'line') {
+        if (element.points && element.points.length > 0) {
+            const points = element.points.map(p => [p.x, p.y] as [number, number]);
+            drawable = [rc.generator.linearPath(points, options)];
+            if (element.type === "arrow") {
+                const last = element.points[element.points.length - 1];
+                const prev = element.points[element.points.length - 2] || { x: 0, y: 0 };
+                const arrowAngle = Math.atan2(last.y - prev.y, last.x - prev.x);
+                const headLen = Math.min(20, Math.max(10, element.strokeWidth * 4));
+                const x2 = last.x;
+                const y2 = last.y;
+                const x1 = x2 - headLen * Math.cos(arrowAngle - Math.PI / 6);
+                const y1 = y2 - headLen * Math.sin(arrowAngle - Math.PI / 6);
+                const x3 = x2 - headLen * Math.cos(arrowAngle + Math.PI / 6);
+                const y3 = y2 - headLen * Math.sin(arrowAngle + Math.PI / 6);
+                drawable.push(rc.generator.linearPath([[x1, y1], [x2, y2], [x3, y3]], options));
+            }
+        }
+    } else if (element.type === 'freedraw') {
+        if (element.points && element.points.length > 0) {
+            const stroke = getStroke(element.points.map(p => [p.x, p.y, p.pressure ?? 0.5]), {
+                size: element.strokeWidth * 2,
+                thinning: 0.5,
+                smoothing: 0.5,
+                streamline: 0.5,
+                simulatePressure: element.simulatePressure ?? true,
+            });
+            const pathData = getSvgPathFromStroke(stroke);
+            drawable = rc.generator.path(pathData, {
+                ...options,
+                fill: options.stroke, // Freedraw is a polygon now
+                fillStyle: 'solid'
+            });
+        }
+    }
+
+    if (drawable) drawableCache.set(key, drawable);
+    return drawable;
 };
 
 const drawElements = (
     ctx: CanvasRenderingContext2D,
+    rc: any,
     elements: ExcalidrawElement[],
     theme: 'light' | 'dark',
     pendingDeletionIds: string[] = [],
-    editingElementId: string | null = null
+    editingElementId: string | null = null,
+    skipIds: string[] = [],
+    draggingOffset?: { x: number, y: number },
+    movingIds?: Set<string>
 ) => {
-    const rc = rough.canvas(ctx.canvas);
     const frameMap = new Map<string, ExcalidrawElement>();
+    const pendingSet = new Set(pendingDeletionIds);
+    const skipSet = new Set(skipIds);
+    const movers = movingIds || new Set<string>();
+
     elements.forEach(el => {
         if (el.type === 'frame') frameMap.set(el.id, el);
     });
 
     elements.forEach(element => {
-        if (editingElementId === element.id && element.type === 'text') return;
+        if (skipSet.has(element.id)) return;
 
-        const isPendingDeletion = pendingDeletionIds.includes(element.id);
+        const isPendingDeletion = pendingSet.has(element.id);
+        const isMoving = movers.has(element.id);
         ctx.save();
-        ctx.globalAlpha = isPendingDeletion ? 0.2 : element.opacity / 100;
+
+        if (isPendingDeletion) {
+            ctx.globalAlpha = 0.3;
+            // Red tint for elements about to be deleted
+        } else {
+            ctx.globalAlpha = element.opacity / 100;
+        }
+
+        // Clip to frame
+        // Apply dragging offset if moving
+        let elementX = element.x;
+        let elementY = element.y;
+        if (isMoving && draggingOffset) {
+            elementX += draggingOffset.x;
+            elementY += draggingOffset.y;
+        }
 
         // Clip to frame
         if (element.frameId) {
             const frame = frameMap.get(element.frameId);
             if (frame) {
+                // Adjust frame clip if frame itself is moving
+                let fx = frame.x;
+                let fy = frame.y;
+                if (movers.has(frame.id) && draggingOffset) {
+                    fx += draggingOffset.x;
+                    fy += draggingOffset.y;
+                }
+
                 ctx.beginPath();
                 // @ts-ignore
-                if (ctx.roundRect) ctx.roundRect(frame.x, frame.y, frame.width, frame.height, 8);
-                else ctx.rect(frame.x, frame.y, frame.width, frame.height);
+                if (ctx.roundRect) ctx.roundRect(fx, fy, frame.width, frame.height, 8);
+                else ctx.rect(fx, fy, frame.width, frame.height);
                 ctx.clip();
             }
         }
 
         // Apply element rotation
         if (element.angle) {
-            const cx = element.x + element.width / 2;
-            const cy = element.y + element.height / 2;
+            const cx = elementX + element.width / 2;
+            const cy = elementY + element.height / 2;
             ctx.translate(cx, cy);
             ctx.rotate(element.angle);
             ctx.translate(-cx, -cy);
@@ -221,9 +354,9 @@ const drawElements = (
 
         const options = {
             seed: element.seed,
-            stroke: adaptiveStrokeColor,
+            stroke: isPendingDeletion ? "#ef4444" : adaptiveStrokeColor,
             strokeWidth: element.strokeWidth,
-            fill: adaptiveBackgroundColor !== 'transparent' ? adaptiveBackgroundColor : undefined,
+            fill: isPendingDeletion ? "#fee2e2" : (adaptiveBackgroundColor !== 'transparent' ? adaptiveBackgroundColor : undefined),
             fillStyle: element.fillStyle || 'hachure',
             fillWeight: element.strokeWidth / 2,
             hachureGap: 4,
@@ -234,6 +367,8 @@ const drawElements = (
         };
 
         if (element.type === 'text') {
+            // Always render text, even if it's being edited (textarea overlay handles editing)
+            // The textarea will be on top, but text should still be visible when not editing
             ctx.setLineDash([]);
             ctx.textBaseline = "top";
             ctx.fillStyle = adaptiveStrokeColor;
@@ -245,16 +380,7 @@ const drawElements = (
                 fontStyle: element.fontStyle
             });
             ctx.font = font;
-            drawText(ctx, element);
-        } else if (element.type === 'rectangle') {
-            const r = element.roundness || 0;
-            if (r > 0) {
-                const { x, y, width: w, height: h } = element;
-                const path = `M ${x + r} ${y} L ${x + w - r} ${y} A ${r} ${r} 0 0 1 ${x + w} ${y + r} L ${x + w} ${y + h - r} A ${r} ${r} 0 0 1 ${x + w - r} ${y + h} L ${x + r} ${y + h} A ${r} ${r} 0 0 1 ${x} ${y + h - r} L ${x} ${y + r} A ${r} ${r} 0 0 1 ${x + r} ${y} Z`;
-                rc.path(path, options);
-            } else {
-                rc.rectangle(element.x, element.y, element.width, element.height, options);
-            }
+            drawText(ctx, element, elementX, elementY);
         } else if (element.type === 'frame') {
             ctx.save();
             const frameColor = "#a8a29e";
@@ -262,53 +388,34 @@ const drawElements = (
             ctx.lineWidth = 1;
             ctx.beginPath();
             // @ts-ignore
-            if (ctx.roundRect) ctx.roundRect(element.x, element.y, element.width, element.height, 8);
-            else ctx.rect(element.x, element.y, element.width, element.height);
+            if (ctx.roundRect) ctx.roundRect(elementX, elementY, element.width, element.height, 8);
+            else ctx.rect(elementX, elementY, element.width, element.height);
             ctx.stroke();
             if (element.name) {
                 ctx.font = `bold 14px "Inter", sans-serif`;
                 ctx.fillStyle = frameColor;
-                ctx.fillText(element.name, element.x, element.y - 12);
+                ctx.fillText(element.name, elementX, elementY - 12);
             }
             ctx.restore();
-        } else if (element.type === 'ellipse') {
-            rc.ellipse(element.x + element.width / 2, element.y + element.height / 2, element.width, element.height, options);
-        } else if (element.type === 'diamond') {
-            rc.polygon([
-                [element.x + element.width / 2, element.y],
-                [element.x + element.width, element.y + element.height / 2],
-                [element.x + element.width / 2, element.y + element.height],
-                [element.x, element.y + element.height / 2]
-            ], options);
-        } else if (element.type === 'arrow' || element.type === 'line') {
-            if (element.points && element.points.length > 0) {
-                const points = element.points.map(p => [element.x + p.x, element.y + p.y] as [number, number]);
-                rc.linearPath(points, options);
-                if (element.type === "arrow") {
-                    const last = element.points[element.points.length - 1];
-                    const prev = element.points[element.points.length - 2];
-                    const arrowAngle = Math.atan2(last.y - prev.y, last.x - prev.x);
-                    const headLen = Math.min(20, Math.max(10, element.strokeWidth * 4));
-                    const x2 = element.x + last.x;
-                    const y2 = element.y + last.y;
-                    const x1 = x2 - headLen * Math.cos(arrowAngle - Math.PI / 6);
-                    const y1 = y2 - headLen * Math.sin(arrowAngle - Math.PI / 6);
-                    const x3 = x2 - headLen * Math.cos(arrowAngle + Math.PI / 6);
-                    const y3 = y2 - headLen * Math.sin(arrowAngle + Math.PI / 6);
-                    rc.linearPath([[x1, y1], [x2, y2], [x3, y3]], options);
-                }
-            }
-        } else if (element.type === 'freedraw') {
-            if (element.points && element.points.length > 0) {
-                const points = element.points.map(p => [element.x + p.x, element.y + p.y] as [number, number]);
-                rc.curve(points, options);
-            }
         } else if (element.type === 'icon') {
             ctx.fillStyle = adaptiveStrokeColor;
             ctx.font = `${element.width}px "Inter", sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(element.iconName || "?", element.x + element.width / 2, element.y + element.height / 2);
+            ctx.fillText(element.iconName || "?", elementX + element.width / 2, elementY + element.height / 2);
+        } else {
+            // Shapes with RoughJS drawable caching
+            const drawable = getElementDrawable(rc, element, options);
+            if (drawable) {
+                ctx.save();
+                ctx.translate(elementX, elementY);
+                if (Array.isArray(drawable)) {
+                    drawable.forEach(d => rc.draw(d));
+                } else {
+                    rc.draw(drawable);
+                }
+                ctx.restore();
+            }
         }
         ctx.restore();
     });
@@ -321,7 +428,8 @@ export const renderStaticScene = (
     zoom: number,
     theme: 'light' | 'dark' = 'light',
     showGrid: boolean = true,
-    backgroundColor?: string
+    backgroundColor?: string,
+    skipIds: string[] = [] // Support movement layering
 ) => {
     const dpr = window.devicePixelRatio || 1;
 
@@ -342,10 +450,11 @@ export const renderStaticScene = (
 
     // Apply DPR, then pan and zoom
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.translate(pan.x, pan.y);
+    ctx.translate(Math.round(pan.x), Math.round(pan.y));
     ctx.scale(zoom, zoom);
 
-    drawElements(ctx, elements, theme);
+    const rc = rough.canvas(ctx.canvas);
+    drawElements(ctx, rc, elements, theme, [], null, skipIds);
 
     ctx.restore();
 };
@@ -359,9 +468,14 @@ export const renderDynamicScene = (
     highlightedElementId: string | null = null,
     laserTrails: { x: number; y: number; time: number }[][] = [],
     eraserTrail: { x: number, y: number }[] = [],
-    cursorPos: Point | null = null
+    cursorPos: Point | null = null,
+    roughCanvas?: any,
+    draggingOffsetOverride?: { x: number, y: number },
+    resizingElementOverride?: ExcalidrawElement | null
 ) => {
     const { pan, zoom, selectionBox, editingElementId, pendingDeletionIds } = appState;
+    const effectiveDraggingOffset = draggingOffsetOverride || appState.draggingOffset;
+    const rc = roughCanvas || rough.canvas(ctx.canvas);
     // Note: selectionIds doesn't exist on AppState in previous view, it was selectedElementIds.
     // Let's use the actual names from types.ts.
     const selIds = appState.selectedElementIds || [];
@@ -372,49 +486,113 @@ export const renderDynamicScene = (
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    // Apply DPR, then pan and zoom
+    const movers = new Set<string>();
+    const affectedConnectors = new Set<string>();
+    const pendingSet = new Set(pendingDeletionIds);
+
+    // If we are dragging, resizing or editing, we need to show previews
+    if (effectiveDraggingOffset || appState.isDragging || resizingElementOverride || editingElementId) {
+        selIds.forEach(id => movers.add(id));
+        if (resizingElementOverride) movers.add(resizingElementOverride.id);
+        if (editingElementId) movers.add(editingElementId);
+
+        // One pass to find inheritance and connectors
+        elements.forEach(el => {
+            if (el.type !== 'frame' && el.frameId && movers.has(el.frameId) && !el.isLocked) {
+                movers.add(el.id);
+            }
+        });
+
+        // Another pass for affected connectors only
+        elements.forEach(el => {
+            if (el.type === 'arrow' || el.type === 'line') {
+                const isAffected = (el.startBinding && movers.has(el.startBinding.elementId)) ||
+                    (el.endBinding && movers.has(el.endBinding.elementId));
+                if (isAffected && !movers.has(el.id)) affectedConnectors.add(el.id);
+            }
+        });
+    }
+
+    // 2. Draw Scene with Optimized Pass
+    // Apply transformations
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.translate(pan.x, pan.y);
+    ctx.translate(Math.round(pan.x), Math.round(pan.y));
     ctx.scale(zoom, zoom);
 
-    // 1. Draw Temp Element (Active Drawing)
+    // Draw all active previews (movers, connectors, pending deletions)
+    const itemsToDrawPreview = elements.map(el => {
+        if (resizingElementOverride && el.id === resizingElementOverride.id) return resizingElementOverride;
+        return el;
+    }).filter(el => movers.has(el.id) || affectedConnectors.has(el.id) || pendingSet.has(el.id));
+
+    // For affected connectors that aren't movers, we still need a "light" recalculation
+    // But we'll do it inside drawElements or a specialized pass
+    drawElements(
+        ctx,
+        rc,
+        itemsToDrawPreview,
+        theme,
+        pendingDeletionIds,
+        editingElementId,
+        [],
+        effectiveDraggingOffset || undefined,
+        movers
+    );
+
     if (tempElement) {
-        drawElements(ctx, [tempElement], theme, [], editingElementId);
+        drawElements(ctx, rc, [tempElement], theme, [], editingElementId);
     }
 
     // 2. Draw Selection Overlays
     elements.forEach(element => {
-        const isSelected = selIds.includes(element.id);
-        const isHighlighted = highlightedElementId === element.id;
-        const isBeingEdited = editingElementId === element.id;
+        let displayElement = element;
+        if (resizingElementOverride && element.id === resizingElementOverride.id) {
+            displayElement = resizingElementOverride;
+        }
 
-        if ((isSelected || isHighlighted) && !isBeingEdited) {
+        const isSelected = selIds.includes(displayElement.id);
+        const isHighlighted = highlightedElementId === displayElement.id;
+        const isBeingEdited = editingElementId === displayElement.id;
+
+        // Only show full selection UI for selected elements, subtle border for hover
+        if (isSelected && !isBeingEdited) {
             ctx.save();
-            const selectionColor = isSelected ? "#6965db" : "rgba(105, 101, 219, 0.4)";
+
+            // Apply dragging offset to overlays if element is being dragged
+            let elementX = displayElement.x;
+            let elementY = displayElement.y;
+            if (effectiveDraggingOffset && !displayElement.isLocked) {
+                elementX = Math.round(elementX + effectiveDraggingOffset.x);
+                elementY = Math.round(elementY + effectiveDraggingOffset.y);
+            }
+
+            const selectionColor = "#6965db";
             const handleFillColor = "#ffffff";
             ctx.strokeStyle = selectionColor;
             ctx.lineWidth = 1 / zoom;
 
             ctx.save();
-            if (element.angle) {
-                const cx = element.x + element.width / 2;
-                const cy = element.y + element.height / 2;
+            if (displayElement.angle) {
+                const cx = Math.round(elementX + displayElement.width / 2);
+                const cy = Math.round(elementY + displayElement.height / 2);
                 ctx.translate(cx, cy);
-                ctx.rotate(element.angle);
+                ctx.rotate(displayElement.angle);
                 ctx.translate(-cx, -cy);
             }
 
             const padding = 8 / zoom;
             ctx.beginPath();
             // @ts-ignore
-            if (ctx.roundRect) ctx.roundRect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2, 6 / zoom);
-            else ctx.rect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2);
+            if (ctx.roundRect) ctx.roundRect(elementX - padding, elementY - padding, displayElement.width + padding * 2, displayElement.height + padding * 2, 6 / zoom);
+            else ctx.rect(elementX - padding, elementY - padding, displayElement.width + padding * 2, displayElement.height + padding * 2);
             ctx.stroke();
             ctx.restore();
 
-            if (isSelected && selIds.length === 1 && !element.isLocked) {
-                const handles = getResizeHandles(element, zoom);
-                const connectors = getConnectorHandles(element, zoom);
+            if (selIds.length === 1 && !displayElement.isLocked) {
+                // Create a temporary element with shifted coordinates for handle calculations
+                const proxyEl = { ...displayElement, x: elementX, y: elementY };
+                const handles = getResizeHandles(proxyEl, zoom);
+                const connectors = getConnectorHandles(proxyEl, zoom);
                 const handleSize = 8 / zoom;
 
                 ctx.save();
@@ -501,47 +679,61 @@ export const renderDynamicScene = (
             }
 
             if (element.isLocked) {
-                drawLockIcon(ctx, element.x + element.width / 2, element.y + element.height / 2, 20 / zoom);
+                drawLockIcon(ctx, elementX + element.width / 2, elementY + element.height / 2, 20 / zoom);
             }
 
+            ctx.restore();
+        } else if (isHighlighted && !isSelected && !isBeingEdited && appState.tool === 'selection') {
+            // Subtle hover feedback - just a thin border, no handles
+            ctx.save();
+            const padding = 4 / zoom;
+            ctx.strokeStyle = "rgba(105, 101, 219, 0.3)";
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.beginPath();
+            // @ts-ignore
+            if (ctx.roundRect) ctx.roundRect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2, 4 / zoom);
+            else ctx.rect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2);
+            ctx.stroke();
+            ctx.restore();
+        } else if (isHighlighted && !isSelected && !isBeingEdited && (appState.tool === 'arrow' || appState.tool === 'line')) {
             // Draw snap points for highlighted elements (during arrow/line drawing)
-            if (isHighlighted && !isSelected) {
-                const snapPoints = getSnapPoints(element);
-                ctx.save();
-                snapPoints.forEach(sp => {
-                    ctx.beginPath();
-                    ctx.arc(sp.x, sp.y, 6 / zoom, 0, Math.PI * 2);
-                    ctx.fillStyle = '#6965db';
-                    ctx.globalAlpha = 0.8;
-                    ctx.fill();
-                    ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 1.5 / zoom;
-                    ctx.stroke();
-                });
-                ctx.restore();
-            }
-
+            const snapPoints = getSnapPoints(element);
+            ctx.save();
+            snapPoints.forEach(sp => {
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, 6 / zoom, 0, Math.PI * 2);
+                ctx.fillStyle = '#6965db';
+                ctx.globalAlpha = 0.8;
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5 / zoom;
+                ctx.stroke();
+            });
             ctx.restore();
         }
     });
 
-    // 3. Selection Box
+    // 3. Selection Box (Marquee)
     if (selectionBox) {
         ctx.save();
-        ctx.fillStyle = "rgba(139, 92, 246, 0.1)";
+        ctx.fillStyle = "rgba(105, 101, 219, 0.05)";
         ctx.strokeStyle = "#6965db";
+        ctx.setLineDash([5 / zoom, 5 / zoom]);
         ctx.lineWidth = 1 / zoom;
-        ctx.fillRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
-        ctx.strokeRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
+        ctx.beginPath();
+        ctx.rect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
+        ctx.fill();
+        ctx.stroke();
         ctx.restore();
     }
 
-    // 4. Eraser Trail
+    // 4. Eraser Trail (Soft Red/Pink)
     if (eraserTrail.length > 2) {
         ctx.save();
         ctx.beginPath();
         const baseWidth = 8 / zoom;
-        ctx.fillStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)';
+        ctx.fillStyle = "rgba(255, 0, 89, 0.2)";
         for (let i = 0; i < eraserTrail.length - 1; i++) {
             const p1 = eraserTrail[i];
             const p2 = eraserTrail[i + 1];

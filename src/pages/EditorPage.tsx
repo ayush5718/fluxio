@@ -46,11 +46,12 @@ const EditorPage = () => {
             pendingDeletionIds: [],
             showGrid: true,
             snapToGrid: true,
+            draggingOffset: null,
         };
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                return { ...defaultState, ...parsed, isDragging: false, selectionStart: null, selectionBox: null, selectedElementIds: [], editingElementId: null, resizingState: null };
+                return { ...defaultState, ...parsed, isDragging: false, selectionStart: null, selectionBox: null, selectedElementIds: [], editingElementId: null, resizingState: null, draggingOffset: null };
             } catch (e) { return defaultState; }
         }
         return defaultState;
@@ -90,7 +91,12 @@ const EditorPage = () => {
 
     useEffect(() => {
         if (appState.editingElementId && textAreaRef.current) {
-            setTimeout(() => { textAreaRef.current?.focus(); textAreaRef.current?.select(); }, 0);
+            // Small delay to ensure textarea is rendered and positioned
+            const timeoutId = setTimeout(() => { 
+                textAreaRef.current?.focus(); 
+                textAreaRef.current?.select(); 
+            }, 10);
+            return () => clearTimeout(timeoutId);
         }
     }, [appState.editingElementId]);
 
@@ -241,12 +247,22 @@ const EditorPage = () => {
 
     const handleTextBlur = () => {
         if (appState.editingElementId) {
-            const el = elements.find(e => e.id === appState.editingElementId);
-            if (el && el.type === 'text' && (!el.text || el.text.trim() === '')) {
-                setElements(elements.filter(e => e.id !== el.id));
-            } else {
-                saveHistory(elements);
-            }
+            const updatedElements = elements.map(el => {
+                if (el.id === appState.editingElementId && el.type === 'text') {
+                    // If text is empty, mark for deletion
+                    if (!el.text || el.text.trim() === '') {
+                        return null; // Will be filtered out
+                    }
+                    return el;
+                }
+                return el;
+            }).filter(el => el !== null) as ExcalidrawElement[];
+            
+            // Update elements and save history
+            setElements(updatedElements);
+            saveHistory(updatedElements);
+            
+            // Clear editing state - this will make text visible again
             setAppState(prev => ({ ...prev, editingElementId: null }));
         }
     };
@@ -273,27 +289,48 @@ const EditorPage = () => {
                 const isFrame = el.type === 'frame';
                 const textValue = isFrame ? (el.name || "Frame") : (el.text || "");
                 return (
-                    <textarea ref={textAreaRef} className="fixed z-10 bg-transparent outline-none resize-none overflow-hidden border-none whitespace-pre"
+                    <textarea ref={textAreaRef} 
+                        className="fixed bg-transparent outline-none resize-none overflow-hidden border-none whitespace-pre pointer-events-auto"
                         style={{
                             left: (el.x * appState.zoom) + appState.pan.x,
                             top: ((isFrame ? el.y - 24 : el.y) * appState.zoom) + appState.pan.y,
                             fontSize: (isFrame ? 14 : (el.fontSize || 20)) * appState.zoom,
                             fontFamily: isFrame ? 'sans-serif' : getFontFamilyString(el.fontFamily),
                             color: el.strokeColor || 'inherit',
-                            minWidth: 20 * appState.zoom,
-                            width: Math.max((el.width || 10) * appState.zoom, 50 * appState.zoom),
+                            minWidth: '1px',
+                            minHeight: '1em',
+                            padding: 0,
+                            margin: 0,
+                            lineHeight: 1.25,
+                            transformOrigin: 'top left',
+                            transform: `scale(${appState.zoom})`,
+                            zIndex: 1000, // High z-index to ensure it's on top
+                            caretColor: el.strokeColor || 'inherit',
                         }}
+                        // We set width/height via ref or auto-calc.
+                        // For Excalidraw-like feel, width should be exactly text width + char.
+                        // Height should be scrollHeight.
                         value={textValue}
                         onChange={(e) => {
                             const val = e.target.value;
                             if (isFrame) updateElements(elements.map(item => item.id === el.id ? { ...item, name: val } : item));
                             else {
+                                // Dynamic resize logic
+                                e.target.style.height = 'auto';
+                                e.target.style.height = e.target.scrollHeight + 'px';
+                                e.target.style.width = 'auto';
+                                e.target.style.width = e.target.scrollWidth + 'px';
+
                                 const metrics = measureText(val, el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle);
+                                // We store logic size, but visually we let the textarea grow.
                                 updateElements(elements.map(item => item.id === el.id ? { ...item, text: val, width: metrics.width, height: metrics.height } : item));
                             }
                         }}
                         onBlur={handleTextBlur}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) e.currentTarget.blur(); if (e.key === 'Escape') e.currentTarget.blur(); }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && e.ctrlKey) e.currentTarget.blur();
+                            if (e.key === 'Escape') e.currentTarget.blur();
+                        }}
                         autoFocus spellCheck={false}
                     />
                 );
