@@ -145,6 +145,66 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
             }
         }
 
+        // Multi-select group resize/rotate handles
+        if (appState.tool === 'selection' && appState.selectedElementIds.length > 1) {
+            const selectedElements = elements.filter(el => appState.selectedElementIds.includes(el.id));
+            const commonBox = getCommonBoundingBox(selectedElements);
+            if (commonBox) {
+                const padding = 4 / appState.zoom;
+                const handleSize = 12 / appState.zoom;
+                const corners = {
+                    nw: { x: commonBox.x - padding, y: commonBox.y - padding },
+                    ne: { x: commonBox.x + commonBox.width + padding, y: commonBox.y - padding },
+                    sw: { x: commonBox.x - padding, y: commonBox.y + commonBox.height + padding },
+                    se: { x: commonBox.x + commonBox.width + padding, y: commonBox.y + commonBox.height + padding },
+                };
+                const rotationHandle = {
+                    x: commonBox.x + commonBox.width / 2,
+                    y: commonBox.y - padding - 25 / appState.zoom
+                };
+
+                // Check rotation handle
+                if (Math.hypot(pos.x - rotationHandle.x, pos.y - rotationHandle.y) <= handleSize) {
+                    const centerX = commonBox.x + commonBox.width / 2;
+                    const centerY = commonBox.y + commonBox.height / 2;
+                    const startAngle = Math.atan2(pos.y - centerY, pos.x - centerX);
+                    setAppState(prev => ({
+                        ...prev,
+                        isDragging: true,
+                        selectionStart: pos,
+                        groupResizingState: {
+                            handle: 'rotation',
+                            originalBox: commonBox,
+                            originalElements: selectedElements.map(el => ({
+                                id: el.id, x: el.x, y: el.y, width: el.width, height: el.height, angle: el.angle || 0
+                            })),
+                            startAngle
+                        }
+                    }));
+                    return;
+                }
+
+                // Check corner handles
+                for (const [key, corner] of Object.entries(corners)) {
+                    if (Math.hypot(pos.x - corner.x, pos.y - corner.y) <= handleSize) {
+                        setAppState(prev => ({
+                            ...prev,
+                            isDragging: true,
+                            selectionStart: pos,
+                            groupResizingState: {
+                                handle: key as 'nw' | 'ne' | 'sw' | 'se',
+                                originalBox: commonBox,
+                                originalElements: selectedElements.map(el => ({
+                                    id: el.id, x: el.x, y: el.y, width: el.width, height: el.height
+                                }))
+                            }
+                        }));
+                        return;
+                    }
+                }
+            }
+        }
+
         if (appState.tool === 'eraser') {
             setEraserTrail([pos]);
             setAppState(prev => ({ ...prev, isDragging: true, selectionStart: pos }));
@@ -156,6 +216,76 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
             currentLaserRef.current = [{ x: pos.x, y: pos.y, time: Date.now() }];
             setLaserTrails(prev => [...prev, currentLaserRef.current]);
             setAppState(prev => ({ ...prev, isDragging: true, selectionStart: pos }));
+            return;
+        }
+
+        // Hand Tool - Panning mode
+        if (appState.tool === 'hand') {
+            setAppState(prev => ({ ...prev, isDragging: true, selectionStart: { x: e.clientX, y: e.clientY } }));
+            return;
+        }
+
+        // Zoom Tool - Click to zoom in, shift+click to zoom out
+        if (appState.tool === 'zoom') {
+            const zoomFactor = e.shiftKey ? 0.5 : 2;
+            const newZoom = Math.min(Math.max(appState.zoom * zoomFactor, 0.1), 10);
+            const newPanX = e.clientX - (e.clientX - appState.pan.x) * (newZoom / appState.zoom);
+            const newPanY = e.clientY - (e.clientY - appState.pan.y) * (newZoom / appState.zoom);
+            setAppState(prev => ({ ...prev, zoom: newZoom, pan: { x: newPanX, y: newPanY } }));
+            return;
+        }
+
+        // Note Tool - Create sticky note
+        if (appState.tool === 'note') {
+            const id = crypto.randomUUID();
+            const noteColors = ['#fef08a', '#fde68a', '#fed7aa', '#d9f99d', '#a5f3fc', '#c4b5fd', '#fecaca'];
+            const randomColor = noteColors[Math.floor(Math.random() * noteColors.length)];
+            const newNote: ExcalidrawElement = {
+                id,
+                type: 'note',
+                x: pos.x,
+                y: pos.y,
+                width: 200,
+                height: 200,
+                strokeColor: 'transparent',
+                backgroundColor: randomColor,
+                strokeWidth: 0,
+                strokeStyle: 'solid',
+                fillStyle: 'solid',
+                opacity: 100,
+                text: '',
+                fontSize: 16,
+                seed: Math.floor(Math.random() * 2 ** 31),
+                roundness: 8,
+            };
+            setElements(prev => [...prev, newNote]);
+            saveHistory([...elements, newNote]);
+            setAppState(prev => ({ ...prev, selectedElementIds: [id], editingElementId: id }));
+            return;
+        }
+
+        // Highlight Tool - Semi-transparent marker
+        if (appState.tool === 'highlight') {
+            setAppState(prev => ({ ...prev, isDragging: true, selectionStart: pos }));
+            const id = crypto.randomUUID();
+            const newHighlight: ExcalidrawElement = {
+                id,
+                type: 'highlight',
+                x: pos.x,
+                y: pos.y,
+                width: 0,
+                height: 0,
+                strokeColor: '#facc15',
+                backgroundColor: 'transparent',
+                strokeWidth: 20,
+                strokeStyle: 'solid',
+                fillStyle: 'solid',
+                opacity: 40,
+                points: [{ x: 0, y: 0, pressure: pos.pressure }],
+                seed: Math.floor(Math.random() * 2 ** 31),
+                simulatePressure: true,
+            };
+            setTempElement(newHighlight);
             return;
         }
 
@@ -276,6 +406,41 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                     document.body.style.cursor = 'crosshair';
                     return;
                 }
+
+                // Group handle cursor detection for multi-select
+                if (appState.selectedElementIds.length > 1) {
+                    const selectedElements = elements.filter(el => appState.selectedElementIds.includes(el.id));
+                    const commonBox = getCommonBoundingBox(selectedElements);
+                    if (commonBox) {
+                        const padding = 4 / appState.zoom;
+                        const handleSize = 12 / appState.zoom;
+                        const corners: Record<string, { x: number; y: number; cursor: string }> = {
+                            nw: { x: commonBox.x - padding, y: commonBox.y - padding, cursor: 'nwse-resize' },
+                            ne: { x: commonBox.x + commonBox.width + padding, y: commonBox.y - padding, cursor: 'nesw-resize' },
+                            sw: { x: commonBox.x - padding, y: commonBox.y + commonBox.height + padding, cursor: 'nesw-resize' },
+                            se: { x: commonBox.x + commonBox.width + padding, y: commonBox.y + commonBox.height + padding, cursor: 'nwse-resize' },
+                        };
+                        const rotationHandle = {
+                            x: commonBox.x + commonBox.width / 2,
+                            y: commonBox.y - padding - 25 / appState.zoom
+                        };
+
+                        // Check rotation handle
+                        if (Math.hypot(pos.x - rotationHandle.x, pos.y - rotationHandle.y) <= handleSize) {
+                            document.body.style.cursor = 'grab';
+                            return;
+                        }
+
+                        // Check corner handles
+                        for (const [, corner] of Object.entries(corners)) {
+                            if (Math.hypot(pos.x - corner.x, pos.y - corner.y) <= handleSize) {
+                                document.body.style.cursor = corner.cursor;
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 // Show grab cursor when hovering over an element OR within the bounds of a selected element
                 const selectedIds = new Set(appState.selectedElementIds);
                 const isOverSelectedBounds = elements.some(el => selectedIds.has(el.id) && isPointInElementBounds(pos.x, pos.y, el));
@@ -355,6 +520,116 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 return;
             }
 
+            // Hand Tool - Panning while dragging
+            if (appState.tool === 'hand' && e.buttons === 1) {
+                if (appState.selectionStart) {
+                    const dx = e.clientX - appState.selectionStart.x;
+                    const dy = e.clientY - appState.selectionStart.y;
+                    setAppState(prev => ({
+                        ...prev,
+                        pan: { x: prev.pan.x + dx, y: prev.pan.y + dy },
+                        selectionStart: { x: e.clientX, y: e.clientY }
+                    }));
+                }
+                return;
+            }
+
+            // Highlight Tool - Collect points like freedraw
+            if (appState.tool === 'highlight' && tempElement && tempElement.type === 'highlight') {
+                const relativeX = pos.x - tempElement.x;
+                const relativeY = pos.y - tempElement.y;
+                const currentPoints = tempElement.points || [];
+                const lastPoint = currentPoints.length > 0 ? currentPoints[currentPoints.length - 1] : { x: 0, y: 0 };
+                const dist = Math.hypot(relativeX - lastPoint.x, relativeY - lastPoint.y);
+                if (dist > 2) {
+                    const newPoints = [...currentPoints, { x: relativeX, y: relativeY, pressure: pos.pressure }];
+                    const xs = newPoints.map(p => p.x);
+                    const ys = newPoints.map(p => p.y);
+                    const newWidth = Math.max(...xs) - Math.min(...xs) || 1;
+                    const newHeight = Math.max(...ys) - Math.min(...ys) || 1;
+                    setTempElement({ ...tempElement, width: newWidth, height: newHeight, points: newPoints });
+                }
+                return;
+            }
+
+            // Group resize/rotate transform
+            if (appState.groupResizingState && appState.tool === 'selection') {
+                const grs = appState.groupResizingState;
+                const centerX = grs.originalBox.x + grs.originalBox.width / 2;
+                const centerY = grs.originalBox.y + grs.originalBox.height / 2;
+
+                if (grs.handle === 'rotation') {
+                    // Calculate rotation
+                    const currentAngle = Math.atan2(pos.y - centerY, pos.x - centerX);
+                    const deltaAngle = currentAngle - (grs.startAngle || 0);
+
+                    setElements(prev => prev.map(el => {
+                        const orig = grs.originalElements.find(o => o.id === el.id);
+                        if (!orig) return el;
+                        // Rotate element position around center
+                        const dx = orig.x + orig.width / 2 - centerX;
+                        const dy = orig.y + orig.height / 2 - centerY;
+                        const cos = Math.cos(deltaAngle);
+                        const sin = Math.sin(deltaAngle);
+                        const newCenterX = centerX + dx * cos - dy * sin;
+                        const newCenterY = centerY + dx * sin + dy * cos;
+                        return {
+                            ...el,
+                            x: newCenterX - orig.width / 2,
+                            y: newCenterY - orig.height / 2,
+                            angle: (orig.angle || 0) + deltaAngle
+                        };
+                    }));
+                } else {
+                    // Calculate scale factors based on handle
+                    let scaleX = 1, scaleY = 1;
+                    let anchorX = grs.originalBox.x;
+                    let anchorY = grs.originalBox.y;
+
+                    if (grs.handle === 'se') {
+                        scaleX = Math.max(0.1, (pos.x - grs.originalBox.x) / grs.originalBox.width);
+                        scaleY = Math.max(0.1, (pos.y - grs.originalBox.y) / grs.originalBox.height);
+                        anchorX = grs.originalBox.x;
+                        anchorY = grs.originalBox.y;
+                    } else if (grs.handle === 'sw') {
+                        scaleX = Math.max(0.1, (grs.originalBox.x + grs.originalBox.width - pos.x) / grs.originalBox.width);
+                        scaleY = Math.max(0.1, (pos.y - grs.originalBox.y) / grs.originalBox.height);
+                        anchorX = grs.originalBox.x + grs.originalBox.width;
+                        anchorY = grs.originalBox.y;
+                    } else if (grs.handle === 'ne') {
+                        scaleX = Math.max(0.1, (pos.x - grs.originalBox.x) / grs.originalBox.width);
+                        scaleY = Math.max(0.1, (grs.originalBox.y + grs.originalBox.height - pos.y) / grs.originalBox.height);
+                        anchorX = grs.originalBox.x;
+                        anchorY = grs.originalBox.y + grs.originalBox.height;
+                    } else if (grs.handle === 'nw') {
+                        scaleX = Math.max(0.1, (grs.originalBox.x + grs.originalBox.width - pos.x) / grs.originalBox.width);
+                        scaleY = Math.max(0.1, (grs.originalBox.y + grs.originalBox.height - pos.y) / grs.originalBox.height);
+                        anchorX = grs.originalBox.x + grs.originalBox.width;
+                        anchorY = grs.originalBox.y + grs.originalBox.height;
+                    }
+
+                    // Apply uniform scale if shift is held
+                    if (e.shiftKey) {
+                        const uniformScale = Math.max(scaleX, scaleY);
+                        scaleX = uniformScale;
+                        scaleY = uniformScale;
+                    }
+
+                    setElements(prev => prev.map(el => {
+                        const orig = grs.originalElements.find(o => o.id === el.id);
+                        if (!orig) return el;
+                        return {
+                            ...el,
+                            x: anchorX + (orig.x - anchorX) * scaleX,
+                            y: anchorY + (orig.y - anchorY) * scaleY,
+                            width: orig.width * scaleX,
+                            height: orig.height * scaleY
+                        };
+                    }));
+                }
+                return;
+            }
+
             if (e.buttons === 4 || (appState.tool === 'selection' && e.buttons === 2)) {
                 setAppState(prev => ({ ...prev, pan: { x: prev.pan.x + e.movementX, y: prev.pan.y + e.movementY } }));
                 return;
@@ -378,8 +653,8 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 return;
             }
 
-            // Element dragging - only if no selection box is active
-            if (appState.selectionStart && appState.tool === 'selection' && appState.selectedElementIds.length > 0 && !appState.selectionBox) {
+            // Element dragging - only if no selection box is active AND not group resizing
+            if (appState.selectionStart && appState.tool === 'selection' && appState.selectedElementIds.length > 0 && !appState.selectionBox && !appState.groupResizingState) {
                 let dx = pos.x - appState.selectionStart.x;
                 let dy = pos.y - appState.selectionStart.y;
                 if (dx === 0 && dy === 0) return;
@@ -512,9 +787,14 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
     }, [appState, elements, tempElement, getPointerPosLocal, setAppState, setElements, setTempElement, setCursorPos, setHighlightedElementId, setEraserTrail, setLaserTrails, currentLaserRef]);
 
     const handleMouseUp = useCallback((e: React.PointerEvent) => {
-        // Reset cursor
-        document.body.style.cursor = '';
         const pos = getPointerPosLocal(e);
+
+        // Group resize/rotate finalization
+        if (appState.groupResizingState) {
+            saveHistory(elements);
+            setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, groupResizingState: null }));
+            return;
+        }
 
         if (!appState.isDragging) {
             setAppState(prev => ({ ...prev, isDragging: false, selectionBox: null, selectionStart: null }));
@@ -570,6 +850,47 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 setElements(nextElements);
                 saveHistory(nextElements);
                 // Keep the freedraw tool selected for continuous drawing (professional behavior)
+                setTempElement(null);
+                setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, selectionBox: null, resizingState: null }));
+                return;
+            }
+
+            // Highlight finalization - same normalization as freedraw
+            if (tempElement.type === 'highlight') {
+                if (!tempElement.points || tempElement.points.length < 2) {
+                    setTempElement(null);
+                    setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, selectionBox: null, resizingState: null }));
+                    return;
+                }
+
+                const points = tempElement.points;
+                const xs = points.map(p => p.x);
+                const ys = points.map(p => p.y);
+                const minX = Math.min(...xs);
+                const minY = Math.min(...ys);
+
+                const normalizedPoints = points.map(p => ({
+                    x: p.x - minX,
+                    y: p.y - minY,
+                    pressure: p.pressure
+                }));
+                const newX = tempElement.x + minX;
+                const newY = tempElement.y + minY;
+                const newWidth = Math.max(Math.max(...xs) - minX, 1);
+                const newHeight = Math.max(Math.max(...ys) - minY, 1);
+
+                let final = {
+                    ...tempElement,
+                    x: newX,
+                    y: newY,
+                    width: newWidth,
+                    height: newHeight,
+                    points: normalizedPoints
+                };
+
+                let nextElements = [...elements, final];
+                setElements(nextElements);
+                saveHistory(nextElements);
                 setTempElement(null);
                 setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, selectionBox: null, resizingState: null }));
                 return;

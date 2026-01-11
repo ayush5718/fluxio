@@ -47,11 +47,13 @@ const EditorPage = () => {
             showGrid: true,
             snapToGrid: true,
             draggingOffset: null,
+            groupResizingState: null,
+            cursorStyle: null,
         };
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                return { ...defaultState, ...parsed, isDragging: false, selectionStart: null, selectionBox: null, selectedElementIds: [], editingElementId: null, resizingState: null, draggingOffset: null };
+                return { ...defaultState, ...parsed, isDragging: false, selectionStart: null, selectionBox: null, selectedElementIds: [], editingElementId: null, resizingState: null, draggingOffset: null, groupResizingState: null };
             } catch (e) { return defaultState; }
         }
         return defaultState;
@@ -76,6 +78,7 @@ const EditorPage = () => {
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [tempElement, setTempElement] = useState<ExcalidrawElement | null>(null);
     const textAreaRef = useRef<HTMLTextAreaElement>(null);
+    const imageInputRef = useRef<HTMLInputElement>(null);
 
     // Hooks for events
     const { handleMouseDown, handleMouseMove, handleMouseUp, handleDoubleClick } = useEditorEvents({
@@ -83,6 +86,72 @@ const EditorPage = () => {
         setCursorPos, setHighlightedElementId, setEraserTrail, setLaserTrails, currentLaserRef,
         saveHistory, defineFrameGroups, handleDragToFrame
     });
+
+    // Image processing function
+    const addImageFromFile = (file: File, x = 100, y = 100) => {
+        if (!file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const imageData = e.target?.result as string;
+            const img = new window.Image();
+            img.onload = () => {
+                // Scale down large images
+                let width = img.width;
+                let height = img.height;
+                const maxDim = 400;
+                if (width > maxDim || height > maxDim) {
+                    const scale = maxDim / Math.max(width, height);
+                    width *= scale;
+                    height *= scale;
+                }
+                const id = crypto.randomUUID();
+                const newElement: ExcalidrawElement = {
+                    id,
+                    type: 'image',
+                    x,
+                    y,
+                    width,
+                    height,
+                    strokeColor: 'transparent',
+                    backgroundColor: 'transparent',
+                    strokeWidth: 0,
+                    strokeStyle: 'solid',
+                    fillStyle: 'solid',
+                    opacity: 100,
+                    imageData,
+                    seed: Math.floor(Math.random() * 2 ** 31),
+                };
+                setElements(prev => [...prev, newElement]);
+                saveHistory([...elements, newElement]);
+                setAppState(prev => ({ ...prev, tool: 'selection', selectedElementIds: [id] }));
+            };
+            img.src = imageData;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // Handle image tool selection
+    const handleSelectTool = (tool: typeof appState.tool) => {
+        if (tool === 'image') {
+            imageInputRef.current?.click();
+            return;
+        }
+        setAppState(prev => ({ ...prev, tool, selectedElementIds: [] }));
+    };
+
+    // Handle file input change
+    const handleImageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            // Calculate center of viewport for image placement
+            const x = (window.innerWidth / 2 - appState.pan.x) / appState.zoom - 100;
+            const y = (window.innerHeight / 2 - appState.pan.y) / appState.zoom - 100;
+            addImageFromFile(file, x, y);
+        }
+        // Reset input so same file can be selected again
+        e.target.value = '';
+    };
+
 
     useEffect(() => {
         localStorage.setItem('theme', theme);
@@ -175,6 +244,51 @@ const EditorPage = () => {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [appState.selectedElementIds, elements]);
+
+    // Drag and drop handler for images
+    useEffect(() => {
+        const handleDragOver = (e: DragEvent) => {
+            e.preventDefault();
+        };
+        const handleDrop = (e: DragEvent) => {
+            e.preventDefault();
+            const file = e.dataTransfer?.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const x = (e.clientX - appState.pan.x) / appState.zoom;
+                const y = (e.clientY - appState.pan.y) / appState.zoom;
+                addImageFromFile(file, x, y);
+            }
+        };
+        window.addEventListener('dragover', handleDragOver);
+        window.addEventListener('drop', handleDrop);
+        return () => {
+            window.removeEventListener('dragover', handleDragOver);
+            window.removeEventListener('drop', handleDrop);
+        };
+    }, [appState.pan, appState.zoom]);
+
+    // Paste handler for clipboard images
+    useEffect(() => {
+        const handlePaste = (e: ClipboardEvent) => {
+            if (appState.editingElementId) return;
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) {
+                        e.preventDefault();
+                        const x = (window.innerWidth / 2 - appState.pan.x) / appState.zoom - 100;
+                        const y = (window.innerHeight / 2 - appState.pan.y) / appState.zoom - 100;
+                        addImageFromFile(file, x, y);
+                    }
+                    break;
+                }
+            }
+        };
+        window.addEventListener('paste', handlePaste);
+        return () => window.removeEventListener('paste', handlePaste);
+    }, [appState.pan, appState.zoom, appState.editingElementId]);
 
     const handleContextMenu = (e: React.MouseEvent) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); };
 
@@ -464,7 +578,16 @@ const EditorPage = () => {
                 );
             })()}
 
-            <Toolbar activeTool={appState.tool} onSelectTool={(tool) => setAppState(prev => ({ ...prev, tool, selectedElementIds: [] }))} onOpenLibrary={() => setIsLibraryOpen(true)} />
+            <Toolbar activeTool={appState.tool} onSelectTool={handleSelectTool} onOpenLibrary={() => setIsLibraryOpen(true)} />
+
+            {/* Hidden file input for image upload */}
+            <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageInputChange}
+                style={{ display: 'none' }}
+            />
 
             <PropertiesPanel appState={appState} setAppState={setAppState} elements={elements} onUpdateElement={updateSelectedElements} undo={undo} redo={redo}
                 clearCanvas={() => { setElements([]); clearHistory(); }} openGemini={() => setIsGeminiOpen(true)}

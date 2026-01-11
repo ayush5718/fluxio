@@ -181,6 +181,9 @@ const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement, x: 
 // Cache for RoughJS drawables to avoid recalculating geometry on every frame
 const drawableCache = new Map<string, any>();
 
+// Cache for loaded images to avoid reloading on every frame
+const imageCache = new Map<string, HTMLImageElement>();
+
 const getEraserOptions = (element: ExcalidrawElement) => {
     return {
         seed: element.seed,
@@ -445,6 +448,96 @@ const drawElements = (
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText(element.iconName || "?", elementX + element.width / 2, elementY + element.height / 2);
+        } else if (element.type === 'image') {
+            // Image rendering with caching
+            if (element.imageData) {
+                let img = imageCache.get(element.imageData);
+                if (!img) {
+                    img = new window.Image();
+                    img.src = element.imageData;
+                    imageCache.set(element.imageData, img);
+                }
+                if (img.complete) {
+                    ctx.globalAlpha = (element.opacity ?? 100) / 100;
+                    ctx.drawImage(img, elementX, elementY, element.width, element.height);
+                    ctx.globalAlpha = 1;
+                } else {
+                    // Image not loaded yet, draw placeholder
+                    ctx.strokeStyle = '#94a3b8';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeRect(elementX, elementY, element.width, element.height);
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '14px Inter, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('Loading...', elementX + element.width / 2, elementY + element.height / 2);
+                    // Trigger redraw when loaded
+                    img.onload = () => { };
+                }
+            }
+        } else if (element.type === 'note') {
+            // Sticky Note rendering - rounded rectangle with text
+            ctx.save();
+            ctx.globalAlpha = (element.opacity ?? 100) / 100;
+            ctx.fillStyle = element.backgroundColor || '#fef08a';
+            ctx.beginPath();
+            const radius = element.roundness || 8;
+            // @ts-ignore
+            if (ctx.roundRect) {
+                ctx.roundRect(elementX, elementY, element.width, element.height, radius);
+            } else {
+                ctx.rect(elementX, elementY, element.width, element.height);
+            }
+            ctx.fill();
+            // Add subtle shadow effect for sticky note
+            ctx.shadowColor = 'rgba(0,0,0,0.1)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetY = 4;
+            // Draw text if present
+            if (element.text) {
+                ctx.fillStyle = '#1f2937';
+                ctx.font = `${element.fontSize || 16}px "Inter", sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                const padding = 16;
+                const lines = element.text.split('\n');
+                const lineHeight = (element.fontSize || 16) * 1.4;
+                lines.forEach((line, i) => {
+                    ctx.fillText(line, elementX + padding, elementY + padding + i * lineHeight);
+                });
+            }
+            ctx.restore();
+        } else if (element.type === 'highlight') {
+            // Highlight tool rendering - semi-transparent freehand marker
+            ctx.save();
+            ctx.globalAlpha = (element.opacity ?? 40) / 100;
+            if (element.points && element.points.length > 1) {
+                const stroke = getStroke(element.points.map(p => [p.x, p.y, p.pressure || 0.5]), {
+                    size: element.strokeWidth || 20,
+                    thinning: 0,
+                    smoothing: 0.6,
+                    streamline: 0.5,
+                    simulatePressure: false,
+                    start: { taper: 0, cap: true },
+                    end: { taper: 0, cap: true },
+                });
+                if (stroke.length > 0) {
+                    const pathData = getSvgPathFromStroke(stroke);
+                    const path = new (globalThis as any).Path2D(pathData);
+                    ctx.translate(elementX, elementY);
+                    ctx.fillStyle = element.strokeColor || '#facc15';
+                    ctx.fill(path);
+                }
+            } else if (element.points && element.points.length === 1) {
+                // Single point - draw circle
+                ctx.beginPath();
+                ctx.arc(elementX + element.points[0].x, elementY + element.points[0].y, (element.strokeWidth || 20) / 2, 0, Math.PI * 2);
+                ctx.fillStyle = element.strokeColor || '#facc15';
+                ctx.fill();
+            }
+            ctx.restore();
         } else {
             // Shapes with RoughJS drawable caching
             const drawable = getElementDrawable(rc, element, options);
@@ -686,8 +779,9 @@ export const renderDynamicScene = (
     const handleFillColor = "#ffffff";
 
     // --- SELECTION HIGHLIGHTS & HANDLES ---
-    // Common Bounding Box for multi-selection
-    if (selIds.length > 1) {
+    // Common Bounding Box for multi-selection with handles (Excalidraw style)
+    const isMultiSelect = selIds.length > 1;
+    if (isMultiSelect) {
         const selectedElements = elements.filter(el => selIds.includes(el.id));
         const commonBox = getCommonBoundingBox(selectedElements);
         if (commonBox) {
@@ -699,15 +793,53 @@ export const renderDynamicScene = (
                 by += effectiveDraggingOffset.y;
             }
 
+            // Dashed bounding box (Excalidraw style)
             ctx.strokeStyle = selectionColor;
             ctx.lineWidth = 1.2 / zoom;
-            const padding = 8 / zoom;
+            ctx.setLineDash([6 / zoom, 4 / zoom]);
+            const padding = 4 / zoom;
 
             ctx.beginPath();
-            // @ts-ignore
-            if (ctx.roundRect) ctx.roundRect(bx - padding, by - padding, commonBox.width + padding * 2, commonBox.height + padding * 2, 6 / zoom);
-            else ctx.rect(bx - padding, by - padding, commonBox.width + padding * 2, commonBox.height + padding * 2);
+            ctx.rect(bx - padding, by - padding, commonBox.width + padding * 2, commonBox.height + padding * 2);
             ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw corner resize handles on outer box
+            const handleSize = 8 / zoom;
+            const corners = [
+                { x: bx - padding, y: by - padding }, // nw
+                { x: bx + commonBox.width + padding, y: by - padding }, // ne
+                { x: bx - padding, y: by + commonBox.height + padding }, // sw
+                { x: bx + commonBox.width + padding, y: by + commonBox.height + padding }, // se
+            ];
+            corners.forEach(c => {
+                ctx.fillStyle = handleFillColor;
+                ctx.strokeStyle = selectionColor;
+                ctx.lineWidth = 1.5 / zoom;
+                ctx.fillRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+                ctx.strokeRect(c.x - handleSize / 2, c.y - handleSize / 2, handleSize, handleSize);
+            });
+
+            // Draw rotation handle
+            const rotationHandleY = by - padding - 25 / zoom;
+            const rotationHandleX = bx + commonBox.width / 2;
+            ctx.beginPath();
+            ctx.setLineDash([4 / zoom, 4 / zoom]);
+            ctx.moveTo(bx + commonBox.width / 2, by - padding);
+            ctx.lineTo(rotationHandleX, rotationHandleY);
+            ctx.strokeStyle = selectionColor;
+            ctx.globalAlpha = 0.5;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1.0;
+            ctx.beginPath();
+            ctx.fillStyle = handleFillColor;
+            ctx.strokeStyle = selectionColor;
+            ctx.lineWidth = 1.5 / zoom;
+            ctx.arc(rotationHandleX, rotationHandleY, handleSize / 2, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+
             ctx.restore();
         }
     }
@@ -744,94 +876,125 @@ export const renderDynamicScene = (
                 ctx.rotate(displayElement.angle);
                 ctx.translate(-cx, -cy);
             }
+            // Calculate actual bounds for elements with points (arrows, lines, freedraw, highlight)
+            let boxX = elementX;
+            let boxY = elementY;
+            let boxW = displayElement.width;
+            let boxH = displayElement.height;
+
+            if (displayElement.points && displayElement.points.length > 0) {
+                const pts = displayElement.points;
+                const xs = pts.map(p => p.x);
+                const ys = pts.map(p => p.y);
+                const minX = Math.min(...xs);
+                const minY = Math.min(...ys);
+                const maxX = Math.max(...xs);
+                const maxY = Math.max(...ys);
+                boxX = elementX + minX;
+                boxY = elementY + minY;
+                boxW = Math.max(maxX - minX, 1);
+                boxH = Math.max(maxY - minY, 1);
+            }
 
             const padding = 8 / zoom;
+
+            // During multi-select: show only dashed outline (no handles)
+            // During single-select: show solid outline with handles
+            if (isMultiSelect) {
+                ctx.setLineDash([4 / zoom, 3 / zoom]);
+                ctx.globalAlpha = 0.7;
+            }
+
             ctx.beginPath();
             // @ts-ignore
-            if (ctx.roundRect) ctx.roundRect(elementX - padding, elementY - padding, displayElement.width + padding * 2, displayElement.height + padding * 2, 6 / zoom);
-            else ctx.rect(elementX - padding, elementY - padding, displayElement.width + padding * 2, displayElement.height + padding * 2);
+            if (ctx.roundRect) ctx.roundRect(boxX - padding, boxY - padding, boxW + padding * 2, boxH + padding * 2, 6 / zoom);
+            else ctx.rect(boxX - padding, boxY - padding, boxW + padding * 2, boxH + padding * 2);
             ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1.0;
             ctx.restore();
 
-            // Handlers only for single selection
-            const proxyEl = { ...displayElement, x: elementX, y: elementY };
-            const handles = getResizeHandles(proxyEl, zoom);
-            const connectors = getConnectorHandles(proxyEl, zoom);
-            const handleSize = 9 / zoom;
+            // Handlers and connectors only for SINGLE selection
+            if (!isMultiSelect) {
+                const proxyEl = { ...displayElement, x: boxX, y: boxY, width: boxW, height: boxH };
+                const handles = getResizeHandles(proxyEl, zoom);
+                const connectors = getConnectorHandles(proxyEl, zoom);
+                const handleSize = 9 / zoom;
 
-            // Draw handles with reactive feel logic (hover check would need passing down, but let's at least refine styling)
-            Object.entries(handles).forEach(([key, pos]) => {
-                ctx.save();
-                const hx = pos.x;
-                const hy = pos.y;
+                // Draw handles with reactive feel logic
+                Object.entries(handles).forEach(([key, pos]) => {
+                    ctx.save();
+                    const hx = pos.x;
+                    const hy = pos.y;
 
-                // Check if this specific handle is "hovered" - we'd need handleHoverId in appState
-                // For now, let's just make them look better
-                if (key === 'rotation') {
-                    const nHandle = handles['n'];
-                    if (nHandle) {
-                        ctx.setLineDash([4 / zoom, 4 / zoom]);
+                    if (key === 'rotation') {
+                        const nHandle = handles['n'];
+                        if (nHandle) {
+                            ctx.setLineDash([4 / zoom, 4 / zoom]);
+                            ctx.beginPath();
+                            ctx.moveTo(nHandle.x, nHandle.y);
+                            ctx.lineTo(hx, hy);
+                            ctx.strokeStyle = selectionColor;
+                            ctx.globalAlpha = 0.5;
+                            ctx.stroke();
+                        }
                         ctx.beginPath();
-                        ctx.moveTo(nHandle.x, nHandle.y);
-                        ctx.lineTo(hx, hy);
+                        ctx.fillStyle = handleFillColor;
                         ctx.strokeStyle = selectionColor;
-                        ctx.globalAlpha = 0.5;
-                        ctx.stroke();
-                    }
-                    ctx.beginPath();
-                    ctx.fillStyle = handleFillColor;
-                    ctx.strokeStyle = selectionColor;
-                    ctx.lineWidth = 1.5 / zoom;
-                    ctx.globalAlpha = 1.0;
-                    ctx.arc(hx, hy, handleSize / 2, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.stroke();
-                } else {
-                    ctx.fillStyle = handleFillColor;
-                    ctx.strokeStyle = selectionColor;
-                    ctx.lineWidth = 1.5 / zoom;
-                    const hs = handleSize;
-                    if (key.startsWith('p:') || key.startsWith('m:')) {
-                        ctx.beginPath();
-                        ctx.arc(hx, hy, hs / 2, 0, 2 * Math.PI);
+                        ctx.lineWidth = 1.5 / zoom;
+                        ctx.globalAlpha = 1.0;
+                        ctx.arc(hx, hy, handleSize / 2, 0, 2 * Math.PI);
                         ctx.fill();
                         ctx.stroke();
                     } else {
-                        // @ts-ignore
-                        if (ctx.roundRect) {
+                        ctx.fillStyle = handleFillColor;
+                        ctx.strokeStyle = selectionColor;
+                        ctx.lineWidth = 1.5 / zoom;
+                        const hs = handleSize;
+                        if (key.startsWith('p:') || key.startsWith('m:')) {
                             ctx.beginPath();
-                            ctx.roundRect(hx - hs / 2, hy - hs / 2, hs, hs, 2 / zoom);
+                            ctx.arc(hx, hy, hs / 2, 0, 2 * Math.PI);
                             ctx.fill();
                             ctx.stroke();
                         } else {
-                            ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
-                            ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+                            // @ts-ignore
+                            if (ctx.roundRect) {
+                                ctx.beginPath();
+                                ctx.roundRect(hx - hs / 2, hy - hs / 2, hs, hs, 2 / zoom);
+                                ctx.fill();
+                                ctx.stroke();
+                            } else {
+                                ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+                                ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
+                            }
                         }
                     }
-                }
-                ctx.restore();
-            });
+                    ctx.restore();
+                });
 
-            // Connectors
-            for (const [key, p] of Object.entries(connectors)) {
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 7 / zoom, 0, Math.PI * 2);
-                ctx.fillStyle = "#ffffff";
-                ctx.fill();
-                ctx.strokeStyle = selectionColor;
-                ctx.lineWidth = 1.2 / zoom;
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.strokeStyle = selectionColor;
-                ctx.lineWidth = 1 / zoom;
-                const s = 3.5 / zoom;
-                ctx.moveTo(p.x - s, p.y);
-                ctx.lineTo(p.x + s, p.y);
-                ctx.moveTo(p.x, p.y - s);
-                ctx.lineTo(p.x, p.y + s);
-                ctx.stroke();
-                ctx.restore();
+                // Connectors - skip for freedraw/highlight elements (they don't support connections)
+                if (displayElement.type !== 'freedraw' && displayElement.type !== 'highlight') {
+                    for (const [key, p] of Object.entries(connectors)) {
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 7 / zoom, 0, Math.PI * 2);
+                        ctx.fillStyle = "#ffffff";
+                        ctx.fill();
+                        ctx.strokeStyle = selectionColor;
+                        ctx.lineWidth = 1.2 / zoom;
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.strokeStyle = selectionColor;
+                        ctx.lineWidth = 1 / zoom;
+                        const s = 3.5 / zoom;
+                        ctx.moveTo(p.x - s, p.y);
+                        ctx.lineTo(p.x + s, p.y);
+                        ctx.moveTo(p.x, p.y - s);
+                        ctx.lineTo(p.x, p.y + s);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
             }
 
             if (element.isLocked) {

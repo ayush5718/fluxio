@@ -49,7 +49,11 @@ const CanvasContainer: React.FC<CanvasContainerProps> = (props) => {
                     left: 0,
                     zIndex: 2,
                     touchAction: 'none',
-                    cursor: props.appState.tool === 'selection' ? undefined : (props.appState.tool === 'text' ? 'text' : 'crosshair')
+                    cursor: props.appState.tool === 'hand'
+                        ? (props.appState.isDragging ? 'grabbing' : 'grab')
+                        : props.appState.tool === 'selection'
+                            ? undefined
+                            : (props.appState.tool === 'text' ? 'text' : 'crosshair')
                 }}
             />
         </div>

@@ -135,8 +135,17 @@ export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stro
         px = rotated.x; py = rotated.y;
     }
     const nx = width < 0 ? ex + width : ex, ny = height < 0 ? ey + height : ey, nw = Math.abs(width), nh = Math.abs(height);
-    if (type === 'arrow' || type === 'line' || type === 'freedraw') {
-        if (!points || points.length < 2) return null;
+
+    // Handle highlight like freedraw - line segment hit testing
+    if (type === 'arrow' || type === 'line' || type === 'freedraw' || type === 'highlight') {
+        if (!points || points.length < 2) {
+            // For single point, check if near the point
+            if (points && points.length === 1) {
+                const p = { x: element.x + points[0].x, y: element.y + points[0].y };
+                if (Math.hypot(x - p.x, y - p.y) <= threshold) return 'stroke';
+            }
+            return null;
+        }
         if (x < nx - threshold || x > nx + nw + threshold || y < ny - threshold || y > ny + nh + threshold) return null;
         for (let i = 0; i < points.length - 1; i++) {
             const p1 = { x: element.x + points[i].x, y: element.y + points[i].y };
@@ -145,6 +154,13 @@ export const hitTest = (x: number, y: number, element: ExcalidrawElement): 'stro
         }
         return null;
     }
+
+    // Image elements - simple rectangle fill hit testing
+    if (type === 'image') {
+        const isFill = px >= nx && px <= nx + nw && py >= ny && py <= ny + nh;
+        return isFill ? 'fill' : null;
+    }
+
     let isStroke = false, isFill = false;
     switch (type) {
         case "rectangle": case "frame": {
@@ -201,8 +217,8 @@ export const getElementAtPosition = (x: number, y: number, elements: ExcalidrawE
         if (element.isLocked) continue;
         const type = hitTest(x, y, element);
 
-        // Text and icon elements should always be selectable when hit, regardless of background
-        if ((element.type === 'text' || element.type === 'icon') && type === 'fill') return element;
+        // Text, icon, and image elements should always be selectable when hit, regardless of background
+        if ((element.type === 'text' || element.type === 'icon' || element.type === 'image') && type === 'fill') return element;
 
         // Other elements
         if (type === 'stroke') return element;

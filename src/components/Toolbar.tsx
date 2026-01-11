@@ -1,4 +1,3 @@
-
 import React from "react";
 import { AppState, TOOLS, ToolType } from "../types";
 import {
@@ -13,7 +12,12 @@ import {
   Eraser,
   Wand2,
   Hash,
-  LayoutGrid
+  LayoutGrid,
+  Image,
+  Hand,
+  Highlighter,
+  StickyNote,
+  ZoomIn
 } from "lucide-react";
 
 interface ToolbarProps {
@@ -27,19 +31,25 @@ const Toolbar: React.FC<ToolbarProps> = React.memo(({ activeTool, onSelectTool, 
   const getIcon = (id: string) => {
     switch (id) {
       case "selection": return <MousePointer2 size={20} />;
+      case "hand": return <Hand size={20} />;
       case "rectangle": return <Square size={20} />;
       case "ellipse": return <Circle size={20} />;
       case "diamond": return <Diamond size={20} />;
       case "arrow": return <ArrowRight size={20} />;
       case "line": return <Minus size={20} />;
       case "freedraw": return <Pencil size={20} />;
+      case "highlight": return <Highlighter size={20} />;
       case "text": return <Type size={20} />;
+      case "note": return <StickyNote size={20} />;
+      case "image": return <Image size={20} />;
       case "frame": return <Hash size={20} />;
       case "eraser": return <Eraser size={20} />;
       case "laser": return <Wand2 size={20} />;
+      case "zoom": return <ZoomIn size={20} />;
       default: return <MousePointer2 size={20} />;
     }
   };
+
 
   return (
     <div className="fixed top-6 left-1/2 transform -translate-x-1/2 
