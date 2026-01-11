@@ -569,7 +569,7 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 let nextElements = [...elements, final];
                 setElements(nextElements);
                 saveHistory(nextElements);
-                setAppState(prev => ({ ...prev, tool: 'selection', selectedElementIds: [final.id] }));
+                // Keep the freedraw tool selected for continuous drawing (professional behavior)
                 setTempElement(null);
                 setAppState(prev => ({ ...prev, isDragging: false, selectionStart: null, selectionBox: null, resizingState: null }));
                 return;

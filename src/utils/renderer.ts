@@ -925,7 +925,7 @@ export const renderDynamicScene = (
         ctx.restore();
     }
 
-    // 5. Laser Trails (Tapered & Soft)
+    // 5. Laser Trails (Premium Shiny Effect)
     if (laserTrails.length > 0) {
         const now = Date.now();
         ctx.save();
@@ -933,30 +933,55 @@ export const renderDynamicScene = (
             if (trail.length < 2) return;
 
             // Filter out old points and prepare for getStroke
-            const activePoints = trail.filter(p => now - p.time < 1000);
+            const activePoints = trail.filter(p => now - p.time < 1200);
             if (activePoints.length < 2) return;
 
-            // Use perfect-freehand for tapered laser feel
+            // Use perfect-freehand for tapered laser feel with increased width
             const stroke = getStroke(activePoints.map(p => {
                 const age = now - p.time;
-                const pressure = Math.max(0.1, 1 - age / 1000);
+                const pressure = Math.max(0.15, 1 - age / 1200);
                 return [p.x, p.y, pressure];
             }), {
-                size: 6 / zoom,
-                thinning: 0.8,
-                smoothing: 0.6,
-                streamline: 0.5,
+                size: 8 / zoom, // Wider stroke
+                thinning: 0.6,
+                smoothing: 0.7,
+                streamline: 0.6,
             });
 
             const pathData = getSvgPathFromStroke(stroke);
             if (pathData) {
-                ctx.beginPath();
                 const path = new Path2D(pathData);
-                ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
-                // Add a subtle glow
-                ctx.shadowColor = "rgba(239, 68, 68, 0.4)";
-                ctx.shadowBlur = 4 / zoom;
+
+                // Layer 1: Outer diffuse glow (wide, soft)
+                ctx.save();
+                ctx.shadowColor = "rgba(239, 68, 68, 0.3)";
+                ctx.shadowBlur = 20 / zoom;
+                ctx.fillStyle = "rgba(239, 68, 68, 0.15)";
                 ctx.fill(path);
+                ctx.restore();
+
+                // Layer 2: Mid glow (medium, vibrant)
+                ctx.save();
+                ctx.shadowColor = "rgba(255, 100, 100, 0.6)";
+                ctx.shadowBlur = 10 / zoom;
+                ctx.fillStyle = "rgba(255, 80, 80, 0.5)";
+                ctx.fill(path);
+                ctx.restore();
+
+                // Layer 3: Inner core (bright, sharp) - the "shine"
+                ctx.save();
+                ctx.shadowColor = "rgba(255, 200, 200, 0.8)";
+                ctx.shadowBlur = 4 / zoom;
+                ctx.fillStyle = "rgba(238, 12, 12, 0.9)";
+                ctx.fill(path);
+                ctx.restore();
+
+                // Layer 4: White-hot center highlight for shimmer
+                ctx.save();
+                ctx.globalAlpha = 0.7;
+                ctx.fillStyle = "rgba(236, 17, 17, 0.6)";
+                ctx.fill(path);
+                ctx.restore();
             }
         });
         ctx.restore();
