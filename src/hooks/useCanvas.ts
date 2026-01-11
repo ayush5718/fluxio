@@ -113,7 +113,22 @@ export const useCanvas = (
             appState.viewBackgroundColor,
             skipIds
         );
-    }, [elements, appState.pan, appState.zoom, theme, appState.showGrid, appState.viewBackgroundColor, appState.draggingOffset, appState.selectedElementIds, appState.isDragging, staticCanvasRef]);
+    }, [
+        elements,
+        appState.pan,
+        appState.zoom,
+        theme,
+        appState.showGrid,
+        appState.viewBackgroundColor,
+        appState.isDragging,
+        appState.selectedElementIds,
+        appState.editingElementId,
+        appState.pendingDeletionIds,
+        appState.selectionBox,
+        appState.resizingState,
+        appState.draggingOffset,
+        staticCanvasRef
+    ]);
 
     // Dynamic Layer Loop (Continuous render loop for smooth interactions)
     useEffect(() => {

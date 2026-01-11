@@ -92,9 +92,9 @@ const EditorPage = () => {
     useEffect(() => {
         if (appState.editingElementId && textAreaRef.current) {
             // Small delay to ensure textarea is rendered and positioned
-            const timeoutId = setTimeout(() => { 
-                textAreaRef.current?.focus(); 
-                textAreaRef.current?.select(); 
+            const timeoutId = setTimeout(() => {
+                textAreaRef.current?.focus();
+                textAreaRef.current?.select();
             }, 10);
             return () => clearTimeout(timeoutId);
         }
@@ -247,22 +247,21 @@ const EditorPage = () => {
 
     const handleTextBlur = () => {
         if (appState.editingElementId) {
-            const updatedElements = elements.map(el => {
-                if (el.id === appState.editingElementId && el.type === 'text') {
-                    // If text is empty, mark for deletion
-                    if (!el.text || el.text.trim() === '') {
-                        return null; // Will be filtered out
+            setElements(prev => {
+                const updatedElements = prev.map(el => {
+                    if (el.id === appState.editingElementId && el.type === 'text') {
+                        if (!el.text || el.text.trim() === '') {
+                            return null;
+                        }
+                        return el;
                     }
                     return el;
-                }
-                return el;
-            }).filter(el => el !== null) as ExcalidrawElement[];
-            
-            // Update elements and save history
-            setElements(updatedElements);
-            saveHistory(updatedElements);
-            
-            // Clear editing state - this will make text visible again
+                }).filter(el => el !== null) as ExcalidrawElement[];
+
+                saveHistory(updatedElements);
+                return updatedElements;
+            });
+
             setAppState(prev => ({ ...prev, editingElementId: null }));
         }
     };
@@ -288,42 +287,58 @@ const EditorPage = () => {
                 if (!el) return null;
                 const isFrame = el.type === 'frame';
                 const textValue = isFrame ? (el.name || "Frame") : (el.text || "");
+
+                // Theme-aware color logic: ensure text is visible against background
+                const editorThemeColor = theme === 'dark'
+                    ? (el.strokeColor === '#000000' || el.strokeColor === 'black' ? '#ffffff' : el.strokeColor)
+                    : (el.strokeColor === '#ffffff' || el.strokeColor === 'white' ? '#000000' : el.strokeColor);
+
+                // Calculate scaled dimensions with generous minimums and buffers
+                const scaledFontSize = (isFrame ? 14 : (el.fontSize || 20)) * appState.zoom;
+                const scaledWidth = Math.max((el.width || 20) * appState.zoom, 20);
+                const scaledHeight = Math.max((el.height || 24) * appState.zoom, 24);
+
                 return (
-                    <textarea ref={textAreaRef} 
-                        className="fixed bg-transparent outline-none resize-none overflow-hidden border-none whitespace-pre pointer-events-auto"
+                    <textarea ref={textAreaRef}
+                        className="fixed bg-transparent outline-none resize-none border-none pointer-events-auto overflow-hidden p-0 m-0"
                         style={{
                             left: (el.x * appState.zoom) + appState.pan.x,
                             top: ((isFrame ? el.y - 24 : el.y) * appState.zoom) + appState.pan.y,
-                            fontSize: (isFrame ? 14 : (el.fontSize || 20)) * appState.zoom,
+                            width: (scaledWidth + 40) + 'px',
+                            height: (scaledHeight + 20) + 'px',
+                            fontSize: scaledFontSize + 'px',
                             fontFamily: isFrame ? 'sans-serif' : getFontFamilyString(el.fontFamily),
-                            color: el.strokeColor || 'inherit',
-                            minWidth: '1px',
-                            minHeight: '1em',
-                            padding: 0,
-                            margin: 0,
+                            fontWeight: el.fontWeight || 400,
+                            fontStyle: el.fontStyle || 'normal',
+                            textAlign: (el.textAlign as any) || 'left',
+                            color: editorThemeColor,
                             lineHeight: 1.25,
-                            transformOrigin: 'top left',
-                            transform: `scale(${appState.zoom})`,
-                            zIndex: 1000, // High z-index to ensure it's on top
-                            caretColor: el.strokeColor || 'inherit',
+                            zIndex: 1000,
+                            caretColor: editorThemeColor,
+                            whiteSpace: 'pre-wrap',
+                            overflow: 'hidden',
                         }}
-                        // We set width/height via ref or auto-calc.
-                        // For Excalidraw-like feel, width should be exactly text width + char.
-                        // Height should be scrollHeight.
                         value={textValue}
                         onChange={(e) => {
                             const val = e.target.value;
-                            if (isFrame) updateElements(elements.map(item => item.id === el.id ? { ...item, name: val } : item));
-                            else {
-                                // Dynamic resize logic
+                            if (isFrame) {
+                                updateElements(elements.map(item => item.id === el.id ? { ...item, name: val } : item));
+                            } else {
+                                // Dynamic resize logic for immediate feedback and zero scrollbars
                                 e.target.style.height = 'auto';
                                 e.target.style.height = e.target.scrollHeight + 'px';
                                 e.target.style.width = 'auto';
                                 e.target.style.width = e.target.scrollWidth + 'px';
 
-                                const metrics = measureText(val, el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle);
-                                // We store logic size, but visually we let the textarea grow.
-                                updateElements(elements.map(item => item.id === el.id ? { ...item, text: val, width: metrics.width, height: metrics.height } : item));
+                                // Measure text at original (unzoomed) size for element persistence
+                                const metrics = measureText(val || " ", el.fontSize || 20, el.fontFamily || 1, el.fontWeight, el.fontStyle);
+
+                                updateElements(elements.map(item => item.id === el.id ? {
+                                    ...item,
+                                    text: val,
+                                    width: Math.max(metrics.width, 20),
+                                    height: Math.max(metrics.height, 24)
+                                } : item));
                             }
                         }}
                         onBlur={handleTextBlur}

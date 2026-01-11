@@ -232,7 +232,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
       ref={panelRef}
       onMouseDown={startDrag}
       style={{ left: position.x, top: position.y }}
-      className={`fixed z-50 w-[280px] flex flex-col bg-white/70 dark:bg-[#1e1e1e]/80 border border-white/40 dark:border-gray-800/50 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-2xl overflow-hidden select-none transition-all duration-300 ${isDragging ? 'scale-[1.02] shadow-brand/20 cursor-grabbing ring-2 ring-brand/20' : ''}`}
+      className={`fixed z-50 w-[280px] flex flex-col bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-800 rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden select-none transition-all duration-300 ${isDragging ? 'scale-[1.01] shadow-brand/20 cursor-grabbing ring-2 ring-brand/30' : ''}`}
     >
       {/* Header / Drag Handle */}
       <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 drag-handle cursor-grab active:cursor-grabbing bg-transparent">
@@ -248,21 +248,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
       <div className="p-5 flex flex-col gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar bg-transparent">
 
 
-        {/* Precise Transformation */}
-        {firstSelectedElement && !hasMultipleSelection && (
-          <div className="bg-gray-50/30 dark:bg-gray-800/20 p-4 rounded-2xl border border-gray-100/50 dark:border-gray-800/30 flex flex-col gap-4">
-            <SectionLabel>Transformation</SectionLabel>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <NumericInput label="X Position" value={Math.round(firstSelectedElement.x)} onChange={(v) => handleUpdate({ x: v })} />
-              <NumericInput label="Y Position" value={Math.round(firstSelectedElement.y)} onChange={(v) => handleUpdate({ y: v })} />
-              <NumericInput label="Width" value={Math.round(firstSelectedElement.width)} onChange={(v) => handleUpdate({ width: v })} />
-              <NumericInput label="Height" value={Math.round(firstSelectedElement.height)} onChange={(v) => handleUpdate({ height: v })} />
-            </div>
-            {firstSelectedElement.type !== 'line' && firstSelectedElement.type !== 'arrow' && (
-              <NumericInput label="Rotation (deg)" value={Math.round((firstSelectedElement.angle || 0) * (180 / Math.PI))} onChange={(v) => handleUpdate({ angle: v * (Math.PI / 180) })} />
-            )}
-          </div>
-        )}
+
 
         {/* Colors */}
         <div className="flex flex-col gap-4">
@@ -288,7 +274,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
         </div>
 
         {/* Appearance Sliders */}
-        <div className="bg-gray-50/30 dark:bg-gray-800/20 p-4 rounded-2xl border border-gray-100/50 dark:border-gray-800/30 space-y-4">
+        <div className="bg-gray-100/50 dark:bg-gray-800/40 p-4 rounded-2xl border border-gray-200/50 dark:border-gray-800/30 space-y-4">
           <RangeSlider label="Stroke Width" min={1} max={15} value={strokeWidth} onChange={(v) => handleUpdate({ strokeWidth: v })} />
           <RangeSlider label="Roughness" min={0} max={3} step={0.1} value={roughness} onChange={(v) => handleUpdate({ roughness: v })} />
           <RangeSlider label="Opacity" min={10} max={100} value={opacity} onChange={(v) => handleUpdate({ opacity: v })} />

@@ -27,3 +27,9 @@ body {
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
     background-color: #475569;
 }
+
+/* Text Selection visibility fix */
+textarea::selection {
+    background-color: #6965db; /* Primary brand color */
+    color: #ffffff;
+}

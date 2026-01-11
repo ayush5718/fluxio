@@ -198,7 +198,7 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
         if (appState.tool === 'text') {
             const id = crypto.randomUUID();
             const newEl: ExcalidrawElement = {
-                id, type: 'text', x: pos.x, y: pos.y, width: 20, height: 24, strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor, strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20, fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid", seed: Math.floor(Math.random() * 2 ** 31), fillStyle: appState.fillStyle, roughness: appState.roughness
+                id, type: 'text', x: pos.x, y: pos.y, width: 100, height: 30, strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor, strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20, fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid", seed: Math.floor(Math.random() * 2 ** 31), fillStyle: appState.fillStyle, roughness: appState.roughness
             };
             setElements(prev => [...prev, newEl]);
             setAppState(prev => ({ ...prev, tool: 'selection', editingElementId: id, selectedElementIds: [id], isDragging: false }));
@@ -671,7 +671,7 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
             // Double-click empty space to create new text (Excalidraw behavior)
             const id = crypto.randomUUID();
             const newEl: ExcalidrawElement = {
-                id, type: 'text', x: pos.x, y: pos.y, width: 20, height: 24,
+                id, type: 'text', x: pos.x, y: pos.y, width: 100, height: 30,
                 strokeColor: appState.strokeColor, backgroundColor: appState.backgroundColor,
                 strokeWidth: 1, opacity: appState.opacity, text: "", fontSize: 20,
                 fontFamily: 1, fontWeight: 400, fontStyle: 'normal', strokeStyle: "solid",

@@ -145,7 +145,7 @@ const drawWelcomeScreen = (ctx: CanvasRenderingContext2D, width: number, height:
     ctx.restore();
 };
 
-const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement, x: number, y: number) => {
+const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement, x: number, y: number, color?: string) => {
     const fontSize = element.fontSize || 20;
     const font = getFontString({
         fontSize,
@@ -154,7 +154,7 @@ const drawText = (ctx: CanvasRenderingContext2D, element: ExcalidrawElement, x: 
         fontStyle: element.fontStyle
     });
     ctx.font = font;
-    ctx.fillStyle = element.strokeColor;
+    ctx.fillStyle = color || element.strokeColor;
     ctx.textBaseline = "top";
 
     const lines = wrapText(element.text || "", font, element.width);
@@ -367,8 +367,9 @@ const drawElements = (
         };
 
         if (element.type === 'text') {
-            // Always render text, even if it's being edited (textarea overlay handles editing)
-            // The textarea will be on top, but text should still be visible when not editing
+            // Skip rendering if this element is being edited - the textarea will handle it
+            if (editingElementId === element.id) return;
+
             ctx.setLineDash([]);
             ctx.textBaseline = "top";
             ctx.fillStyle = adaptiveStrokeColor;
@@ -380,7 +381,7 @@ const drawElements = (
                 fontStyle: element.fontStyle
             });
             ctx.font = font;
-            drawText(ctx, element, elementX, elementY);
+            drawText(ctx, element, elementX, elementY, adaptiveStrokeColor);
         } else if (element.type === 'frame') {
             ctx.save();
             const frameColor = "#a8a29e";
@@ -519,14 +520,73 @@ export const renderDynamicScene = (
     ctx.translate(Math.round(pan.x), Math.round(pan.y));
     ctx.scale(zoom, zoom);
 
-    // Draw all active previews (movers, connectors, pending deletions)
-    const itemsToDrawPreview = elements.map(el => {
-        if (resizingElementOverride && el.id === resizingElementOverride.id) return resizingElementOverride;
-        return el;
-    }).filter(el => movers.has(el.id) || affectedConnectors.has(el.id) || pendingSet.has(el.id));
+    // Build a map of elements for fast lookup (preview-aware)
+    const elementsMap = new Map<string, ExcalidrawElement>();
+    elements.forEach(el => elementsMap.set(el.id, el));
 
-    // For affected connectors that aren't movers, we still need a "light" recalculation
-    // But we'll do it inside drawElements or a specialized pass
+    // Draw all active previews (movers, connectors, pending deletions)
+    const itemsToDrawPreview = elements.filter(el => movers.has(el.id) || affectedConnectors.has(el.id) || pendingSet.has(el.id)).map(el => {
+        if (resizingElementOverride && el.id === resizingElementOverride.id) return resizingElementOverride;
+
+        // If it's a connector not being directly moved, but its bound elements are moving, we must recalculate points
+        if (affectedConnectors.has(el.id) && effectiveDraggingOffset) {
+            const isAffected = (el.startBinding && movers.has(el.startBinding.elementId)) ||
+                (el.endBinding && movers.has(el.endBinding.elementId));
+
+            if (isAffected) {
+                // Determine preview positions of bound elements
+                const getPreviewEl = (id: string) => {
+                    const e = elementsMap.get(id);
+                    if (!e) return null;
+                    if (movers.has(id)) return { ...e, x: e.x + effectiveDraggingOffset.x, y: e.y + effectiveDraggingOffset.y };
+                    return e;
+                };
+
+                const startBoundEl = el.startBinding ? getPreviewEl(el.startBinding.elementId) : null;
+                const endBoundEl = el.endBinding ? getPreviewEl(el.endBinding.elementId) : null;
+
+                if (startBoundEl || endBoundEl) {
+                    let newEl = { ...el, points: el.points ? [...el.points] : [] };
+
+                    // We need to calculate start and end positions accurately
+                    let startPos = { x: el.x, y: el.y };
+                    let endPos = { x: el.x + (el.points?.[el.points.length - 1]?.x || 0), y: el.y + (el.points?.[el.points.length - 1]?.y || 0) };
+
+                    if (startBoundEl && endBoundEl && el.startBinding && el.endBinding) {
+                        const smartAnchors = getSmartAnchors(startBoundEl, endBoundEl);
+                        newEl.startBinding = { ...el.startBinding, anchor: smartAnchors.start };
+                        newEl.endBinding = { ...el.endBinding, anchor: smartAnchors.end };
+                        const sP = getAnchorPosition(startBoundEl, smartAnchors.start);
+                        const eP = getAnchorPosition(endBoundEl, smartAnchors.end);
+                        newEl.points = generateOrthogonalPoints(sP, eP, smartAnchors.start as any, smartAnchors.end as any, startBoundEl, endBoundEl, 30);
+                        newEl.x = sP.x;
+                        newEl.y = sP.y;
+                    } else {
+                        if (startBoundEl && el.startBinding) {
+                            const p = getAnchorPosition(startBoundEl, el.startBinding.anchor);
+                            const offX = p.x - el.x;
+                            const offY = p.y - el.y;
+                            newEl.x = p.x;
+                            newEl.y = p.y;
+                            newEl.points = newEl.points.map((pt, i) => i === 0 ? { ...pt, x: 0, y: 0 } : { ...pt, x: pt.x - offX, y: pt.y - offY });
+                        }
+                        if (endBoundEl && el.endBinding) {
+                            const p = getAnchorPosition(endBoundEl, el.endBinding.anchor);
+                            const idx = newEl.points.length - 1;
+                            if (idx >= 0) {
+                                newEl.points[idx] = { ...newEl.points[idx], x: p.x - newEl.x, y: p.y - newEl.y };
+                            }
+                        }
+                    }
+                    return newEl;
+                }
+            }
+        }
+
+        return el;
+    });
+
+    // Draw active previews
     drawElements(
         ctx,
         rc,
