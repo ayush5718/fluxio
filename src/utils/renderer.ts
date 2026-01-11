@@ -722,9 +722,8 @@ export const renderDynamicScene = (
         const isHighlighted = highlightedElementId === displayElement.id;
         const isBeingEdited = editingElementId === displayElement.id;
 
-        // If part of multi-selection, we don't draw individual boxes, only handles if needed
+        // Draw individual selection box for each selected element (professional behavior)
         if (isSelected && !isBeingEdited) {
-            if (selIds.length > 1) return; // Handled by common box for multi-select
 
             ctx.save();
             let elementX = displayElement.x;
@@ -875,53 +874,67 @@ export const renderDynamicScene = (
         }
     });
 
-    // 3. Selection Box (Marquee)
+    // 3. Selection Box (Marquee) - Solid border for professional look
     if (selectionBox) {
         ctx.save();
-        ctx.fillStyle = "rgba(105, 101, 219, 0.05)";
+        ctx.fillStyle = "rgba(105, 101, 219, 0.08)";
         ctx.strokeStyle = "#6965db";
-        ctx.setLineDash([5 / zoom, 5 / zoom]);
-        ctx.lineWidth = 1 / zoom;
+        ctx.setLineDash([]); // Solid line
+        ctx.lineWidth = 1.5 / zoom;
         ctx.beginPath();
-        ctx.rect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
+        // @ts-ignore
+        if (ctx.roundRect) ctx.roundRect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height, 4 / zoom);
+        else ctx.rect(selectionBox.x, selectionBox.y, selectionBox.width, selectionBox.height);
         ctx.fill();
         ctx.stroke();
         ctx.restore();
     }
 
-    // 4. Eraser Trail (Soft Red/Pink)
-    if (eraserTrail.length > 2) {
+    // 4. Eraser Trail (Premium Smooth Effect)
+    if (eraserTrail.length > 1) {
         ctx.save();
-        ctx.beginPath();
-        const baseWidth = 8 / zoom;
-        ctx.fillStyle = "rgba(255, 0, 89, 0.2)";
-        for (let i = 0; i < eraserTrail.length - 1; i++) {
-            const p1 = eraserTrail[i];
-            const p2 = eraserTrail[i + 1];
-            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            if (dist < 0.1) continue;
-            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-            const progress = i / eraserTrail.length;
-            const taper = Math.sin(progress * Math.PI);
-            const w = baseWidth * taper;
-            const dx = Math.cos(angle + Math.PI / 2) * w;
-            const dy = Math.sin(angle + Math.PI / 2) * w;
-            if (i === 0) ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p1.x + dx, p1.y + dy);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Draw multiple passes for a soft, premium effect
+        for (let pass = 0; pass < 3; pass++) {
+            const baseWidth = (24 - pass * 6) / zoom;
+            const alpha = 0.08 + pass * 0.04;
+
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(239, 68, 68, ${alpha})`;
+            ctx.lineWidth = baseWidth;
+
+            if (eraserTrail.length > 0) {
+                ctx.moveTo(eraserTrail[0].x, eraserTrail[0].y);
+
+                // Use quadratic curves for ultra-smooth path
+                for (let i = 1; i < eraserTrail.length - 1; i++) {
+                    const xc = (eraserTrail[i].x + eraserTrail[i + 1].x) / 2;
+                    const yc = (eraserTrail[i].y + eraserTrail[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(eraserTrail[i].x, eraserTrail[i].y, xc, yc);
+                }
+
+                // Last point
+                if (eraserTrail.length > 1) {
+                    const last = eraserTrail[eraserTrail.length - 1];
+                    ctx.lineTo(last.x, last.y);
+                }
+            }
+            ctx.stroke();
         }
-        for (let i = eraserTrail.length - 1; i >= 0; i--) {
-            const p1 = eraserTrail[i];
-            const p2 = eraserTrail[Math.max(0, i - 1)];
-            const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-            const progress = i / eraserTrail.length;
-            const taper = Math.sin(progress * Math.PI);
-            const w = baseWidth * taper;
-            const dx = Math.cos(angle + Math.PI / 2) * w;
-            const dy = Math.sin(angle + Math.PI / 2) * w;
-            ctx.lineTo(p1.x - dx, p1.y - dy);
+
+        // Add a subtle glow at the end point for feedback
+        if (eraserTrail.length > 0) {
+            const tip = eraserTrail[eraserTrail.length - 1];
+            ctx.beginPath();
+            ctx.arc(tip.x, tip.y, 6 / zoom, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(239, 68, 68, 0.3)";
+            ctx.shadowColor = "rgba(239, 68, 68, 0.5)";
+            ctx.shadowBlur = 8 / zoom;
+            ctx.fill();
         }
-        ctx.closePath();
-        ctx.fill();
+
         ctx.restore();
     }
 

@@ -66,16 +66,6 @@ const Toolbar: React.FC<ToolbarProps> = React.memo(({ activeTool, onSelectTool, 
         </button>
       ))}
 
-      <div className="w-[1px] h-8 bg-gray-300 dark:bg-white/10 mx-1"></div>
-
-      <button
-        onClick={onOpenLibrary}
-        title="Icon Library"
-        className="p-2.5 rounded-xl transition-all duration-200 text-gray-600 dark:text-gray-300 hover:bg-white/40 dark:hover:bg-white/10 hover:scale-105"
-      >
-        <LayoutGrid size={20} />
-      </button>
-
     </div>
   );
 });
