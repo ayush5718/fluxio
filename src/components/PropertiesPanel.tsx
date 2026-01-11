@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { AppState, ExcalidrawElement, StrokeStyle, TextAlign } from "../types";
 import {
   BringToFront, SendToBack, ChevronUp, ChevronDown, Group, Ungroup,
@@ -48,18 +49,39 @@ const BACKGROUND_COLORS = [
 
 const Tooltip: React.FC<{ children: React.ReactNode; content: string }> = ({ children, content }) => {
   const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  const updatePosition = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.top + rect.height / 2,
+        left: rect.right + 12
+      });
+    }
+  };
+
   return (
     <div
-      className="relative flex items-center justify-center group"
-      onMouseEnter={() => setShow(true)}
+      ref={triggerRef}
+      className="flex items-center justify-center"
+      onMouseEnter={() => {
+        updatePosition();
+        setShow(true);
+      }}
       onMouseLeave={() => setShow(false)}
     >
       {children}
-      {show && (
-        <div className="absolute left-full ml-3 px-2.5 py-1.5 text-[10px] font-semibold text-white bg-gray-900/90 dark:bg-gray-100 dark:text-gray-900 rounded-lg shadow-xl backdrop-blur-md whitespace-nowrap z-[100] pointer-events-none animate-in fade-in zoom-in-95 duration-200">
+      {show && createPortal(
+        <div
+          className="fixed px-2.5 py-1.5 text-[10px] font-bold text-white bg-gray-900/90 dark:bg-gray-100 dark:text-gray-900 rounded-lg shadow-2xl backdrop-blur-md whitespace-nowrap z-[9999] pointer-events-none animate-in fade-in zoom-in-95 duration-200 -translate-y-1/2"
+          style={{ top: coords.top, left: coords.left }}
+        >
           {content}
           <div className="absolute -left-1 top-1/2 -translate-y-1/2 border-y-[5px] border-y-transparent border-r-[5px] border-r-gray-900/90 dark:border-r-gray-100"></div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -165,6 +187,7 @@ const HexInput: React.FC<{ color: string; onChange: (c: string) => void }> = ({ 
 // Main Component
 // -----------------------------------------------------------------------------
 
+
 const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
   const { appState, setAppState, elements, onUpdateElement, undo, redo, clearCanvas, onLayerChange, onGroup, onUngroup, onAlign, onToggleLock } = props;
 
@@ -172,6 +195,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
   const [position, setPosition] = useState({ x: 20, y: 80 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [showFullStrokeColors, setShowFullStrokeColors] = useState(false);
+  const [showFullBgColors, setShowFullBgColors] = useState(false);
+  const [activeTab, setActiveTab] = useState<'style' | 'arrange'>('style');
 
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -192,8 +218,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
   const roughness = firstSelectedElement?.roughness ?? appState.roughness ?? 0.5;
   const fontFamily = firstSelectedElement?.fontFamily || 1;
   const fontSize = firstSelectedElement?.fontSize || 20;
-
-  const eraserSize = 20;
 
   const handleUpdate = (updates: Partial<ExcalidrawElement>) => {
     if (hasSelection) onUpdateElement(updates);
@@ -227,166 +251,214 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = React.memo((props) => {
     }
   };
 
+  // Quick Colors (First 6)
+  const quickStrokeColors = STROKE_COLORS.slice(0, 6);
+  const quickBgColors = BACKGROUND_COLORS.slice(0, 6);
+
   return (
     <div
       ref={panelRef}
       onMouseDown={startDrag}
       style={{ left: position.x, top: position.y }}
-      className={`fixed z-50 w-[280px] flex flex-col bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-800 rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden select-none transition-all duration-300 ${isDragging ? 'scale-[1.01] shadow-brand/20 cursor-grabbing ring-2 ring-brand/30' : ''}`}
+      className={`fixed z-50 w-[260px] flex flex-col bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-800 rounded-[20px] shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden select-none transition-all duration-300 ${isDragging ? 'scale-[1.01] shadow-brand/20 cursor-grabbing ring-2 ring-brand/30' : ''}`}
     >
-      {/* Header / Drag Handle */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 drag-handle cursor-grab active:cursor-grabbing bg-transparent">
-        <div className="flex gap-2">
-          <button onClick={undo} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"><Undo2 size={16} /></button>
-          <button onClick={redo} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"><Redo2 size={16} /></button>
+      {/* Tab Header / Drag Handle */}
+      <div className="flex flex-col border-b border-gray-100 dark:border-gray-800 drag-handle cursor-grab active:cursor-grabbing">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+          <div className="flex gap-1">
+            <button onClick={(e) => { e.stopPropagation(); undo(); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-500 transition"><Undo2 size={14} /></button>
+            <button onClick={(e) => { e.stopPropagation(); redo(); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-500 transition"><Redo2 size={14} /></button>
+          </div>
+          <div className="w-10 h-1 bg-gray-200 dark:bg-gray-800 rounded-full" />
+          <div className="flex gap-1 opacity-0 pointer-events-none"><Undo2 size={14} /><Redo2 size={14} /></div>
         </div>
-        <div className="w-12 h-1 bg-gray-300 dark:bg-gray-800 rounded-full" />
-        <div className="w-14" /> {/* Spacer for balance */}
+
+        <div className="flex px-4 pb-0 items-center justify-center">
+          <div className="flex bg-gray-100 dark:bg-gray-800/50 p-1 rounded-xl mb-3 w-full">
+            <button
+              onClick={(e) => { e.stopPropagation(); setActiveTab('style'); }}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition-all rounded-lg ${activeTab === 'style' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              Style
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setActiveTab('arrange'); }}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition-all rounded-lg ${activeTab === 'arrange' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              Arrange
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="p-5 flex flex-col gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar bg-transparent">
+      {/* Main Content Area */}
+      <div className="p-4 flex flex-col gap-5 max-h-[60vh] overflow-y-auto custom-scrollbar bg-transparent">
 
+        {activeTab === 'style' && (
+          <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-left-2 duration-300">
+            {/* Colors Section */}
+            <div className="flex flex-col gap-4">
+              {/* Stroke */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Stroke</span>
+                  <button onClick={() => setShowFullStrokeColors(!showFullStrokeColors)} className="text-[9px] font-bold text-brand hover:underline">{showFullStrokeColors ? 'Less' : 'More'}</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(showFullStrokeColors ? STROKE_COLORS : quickStrokeColors).map(c => (
+                    <ColorSwatch key={c} color={c} isSelected={strokeColor === c} onClick={() => handleUpdate({ strokeColor: c })} />
+                  ))}
+                </div>
+                {showFullStrokeColors && <HexInput color={strokeColor} onChange={(c) => handleUpdate({ strokeColor: c })} />}
+              </div>
 
-
-
-        {/* Colors */}
-        <div className="flex flex-col gap-4">
-          <div>
-            <SectionLabel>Stroke Color</SectionLabel>
-            <div className="grid grid-cols-8 gap-2 mb-4">
-              {STROKE_COLORS.map(c => (
-                <ColorSwatch key={c} color={c} isSelected={strokeColor === c} onClick={() => handleUpdate({ strokeColor: c })} />
-              ))}
+              {/* Background */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fill</span>
+                  <button onClick={() => setShowFullBgColors(!showFullBgColors)} className="text-[9px] font-bold text-brand hover:underline">{showFullBgColors ? 'Less' : 'More'}</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(showFullBgColors ? BACKGROUND_COLORS : quickBgColors).map(c => (
+                    <ColorSwatch key={c} color={c} isTransparent={c === 'transparent'} isSelected={bgColor === c} onClick={() => handleUpdate({ backgroundColor: c })} />
+                  ))}
+                </div>
+                {showFullBgColors && <HexInput color={bgColor === 'transparent' ? '#ffffff' : bgColor} onChange={(c) => handleUpdate({ backgroundColor: c })} />}
+              </div>
             </div>
-            <HexInput color={strokeColor} onChange={(c) => handleUpdate({ strokeColor: c })} />
-          </div>
 
-          <div>
-            <SectionLabel>Background Color</SectionLabel>
-            <div className="grid grid-cols-8 gap-2 mb-4">
-              {BACKGROUND_COLORS.map(c => (
-                <ColorSwatch key={c} color={c} isTransparent={c === 'transparent'} isSelected={bgColor === c} onClick={() => handleUpdate({ backgroundColor: c })} />
-              ))}
+            {/* Density Controls Overlay */}
+            <div className="bg-gray-50/50 dark:bg-gray-900/30 p-3.5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-4">
+              <RangeSlider label="Width" min={1} max={15} value={strokeWidth} onChange={(v) => handleUpdate({ strokeWidth: v })} />
+              <RangeSlider label="Rough" min={0} max={3} step={0.1} value={roughness} onChange={(v) => handleUpdate({ roughness: v })} />
+              <RangeSlider label="Opacity" min={10} max={100} value={opacity} onChange={(v) => handleUpdate({ opacity: v })} />
             </div>
-            <HexInput color={bgColor === 'transparent' ? '#ffffff' : bgColor} onChange={(c) => handleUpdate({ backgroundColor: c })} />
-          </div>
-        </div>
 
-        {/* Appearance Sliders */}
-        <div className="bg-gray-100/50 dark:bg-gray-800/40 p-4 rounded-2xl border border-gray-200/50 dark:border-gray-800/30 space-y-4">
-          <RangeSlider label="Stroke Width" min={1} max={15} value={strokeWidth} onChange={(v) => handleUpdate({ strokeWidth: v })} />
-          <RangeSlider label="Roughness" min={0} max={3} step={0.1} value={roughness} onChange={(v) => handleUpdate({ roughness: v })} />
-          <RangeSlider label="Opacity" min={10} max={100} value={opacity} onChange={(v) => handleUpdate({ opacity: v })} />
-        </div>
-
-        {/* Stroke Style */}
-        <div>
-          <SectionLabel>Stroke Style</SectionLabel>
-          <div className="flex gap-2 p-1 bg-gray-50/30 dark:bg-gray-800/20 rounded-xl border border-gray-100/50 dark:border-gray-800/30">
-            <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${strokeStyle === 'solid' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <Minus size={16} strokeWidth={3} />
-            </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${strokeStyle === 'dashed' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <MoreHorizontal size={16} strokeWidth={3} />
-            </button>
-            <button onClick={() => handleUpdate({ strokeStyle: 'dotted' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${strokeStyle === 'dotted' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <div className="flex gap-0.5"><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /><div className="w-1 h-1 rounded-full bg-current" /></div>
-            </button>
-          </div>
-        </div>
-
-        {/* Fill Style */}
-        <div>
-          <SectionLabel>Fill Style</SectionLabel>
-          <div className="flex gap-2 p-1 bg-gray-50/30 dark:bg-gray-800/20 rounded-xl border border-gray-100/50 dark:border-gray-800/30">
-            <button onClick={() => handleUpdate({ fillStyle: 'hachure' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${fillStyle === 'hachure' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <Hash size={16} strokeWidth={2.5} />
-            </button>
-            <button onClick={() => handleUpdate({ fillStyle: 'cross-hatch' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${fillStyle === 'cross-hatch' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <Grid3x3 size={16} />
-            </button>
-            <button onClick={() => handleUpdate({ fillStyle: 'solid' })} className={`flex-1 py-2 rounded-lg flex justify-center items-center gap-2 transition-all ${fillStyle === 'solid' ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>
-              <Square size={14} fill="currentColor" strokeWidth={0} />
-            </button>
-          </div>
-        </div>
-
-        {/* Roundness (Only for Rectangles) */}
-        {hasSelection && !hasMultipleSelection && firstSelectedElement?.type === 'rectangle' && (
-          <div>
-            <SectionLabel>Edges</SectionLabel>
-            <div className="flex gap-2 p-1 bg-gray-50/30 dark:bg-gray-800/20 rounded-xl border border-gray-100/50 dark:border-gray-800/30">
-              <button onClick={() => handleUpdate({ roundness: 0 })} className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${(!firstSelectedElement.roundness || firstSelectedElement.roundness === 0) ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>Sharp</button>
-              <button onClick={() => handleUpdate({ roundness: 12 })} className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${firstSelectedElement.roundness === 12 ? 'bg-brand text-white shadow-lg shadow-brand/20' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700/50'}`}>Round</button>
+            {/* Style Groups (Horizontal) */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <SectionLabel>Stroke</SectionLabel>
+                <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800/50 rounded-xl">
+                  <button onClick={() => handleUpdate({ strokeStyle: 'solid' })} className={`flex-1 py-1.5 rounded-lg flex justify-center items-center transition-all ${strokeStyle === 'solid' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><Minus size={14} strokeWidth={3} /></button>
+                  <button onClick={() => handleUpdate({ strokeStyle: 'dashed' })} className={`flex-1 py-1.5 rounded-lg flex justify-center items-center transition-all ${strokeStyle === 'dashed' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><MoreHorizontal size={14} strokeWidth={3} /></button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <SectionLabel>Edges</SectionLabel>
+                <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800/50 rounded-xl">
+                  <button onClick={() => handleUpdate({ roundness: 0 })} className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold transition-all ${(!firstSelectedElement?.roundness) ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>SHARP</button>
+                  <button onClick={() => handleUpdate({ roundness: 12 })} className={`flex-1 py-1.5 rounded-lg text-[9px] font-bold transition-all ${firstSelectedElement?.roundness === 12 ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>ROUND</button>
+                </div>
+              </div>
             </div>
+
+            <div className="space-y-2">
+              <SectionLabel>Fill Type</SectionLabel>
+              <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800/50 rounded-xl">
+                <button onClick={() => handleUpdate({ fillStyle: 'hachure' })} className={`flex-1 py-1.5 rounded-lg flex justify-center items-center transition-all ${fillStyle === 'hachure' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><Hash size={14} /></button>
+                <button onClick={() => handleUpdate({ fillStyle: 'cross-hatch' })} className={`flex-1 py-1.5 rounded-lg flex justify-center items-center transition-all ${fillStyle === 'cross-hatch' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><Grid3x3 size={14} /></button>
+                <button onClick={() => handleUpdate({ fillStyle: 'solid' })} className={`flex-1 py-1.5 rounded-lg flex justify-center items-center transition-all ${fillStyle === 'solid' ? 'bg-white dark:bg-gray-700 text-brand shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><Square size={12} fill="currentColor" strokeWidth={0} /></button>
+              </div>
+            </div>
+
+            {isTextSelected && (
+              <div className="space-y-3 p-3.5 bg-brand/5 dark:bg-brand/10 rounded-2xl border border-brand/10 dark:border-brand/20">
+                <SectionLabel>Typography</SectionLabel>
+                <div className="flex gap-1 p-1 bg-white/50 dark:bg-black/20 rounded-xl">
+                  <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1 text-[9px] font-bold rounded-lg ${fontFamily === 1 ? 'bg-brand text-white' : 'text-gray-400'}`}>DRAW</button>
+                  <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1 text-[9px] font-bold rounded-lg ${fontFamily === 2 ? 'bg-brand text-white' : 'text-gray-400'}`}>SANS</button>
+                  <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1 text-[9px] font-bold rounded-lg ${fontFamily === 3 ? 'bg-brand text-white' : 'text-gray-400'}`}>MONO</button>
+                </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {[16, 20, 24, 32].map(s => (
+                    <button key={s} onClick={() => handleUpdate({ fontSize: s })} className={`py-1 rounded-lg text-[9px] font-mono font-bold transition-all ${fontSize === s ? 'bg-gray-800 dark:bg-gray-100 text-white dark:text-gray-900' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Text Selection */}
-        {isTextSelected && (
-          <div className="animate-in slide-in-from-right-4 duration-300">
-            <SectionLabel>Typography</SectionLabel>
-            <div className="grid grid-cols-1 gap-3 p-3.5 bg-gray-50/30 dark:bg-gray-800/20 rounded-2xl border border-gray-100/50 dark:border-gray-800/30">
-              <div className="flex gap-1.5">
-                <button onClick={() => handleUpdate({ fontFamily: 1 })} className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold tracking-tight transition-all ${fontFamily === 1 ? 'bg-brand text-white shadow-md' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700'}`}>DRAW</button>
-                <button onClick={() => handleUpdate({ fontFamily: 2 })} className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold tracking-tight transition-all ${fontFamily === 2 ? 'bg-brand text-white shadow-md' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700'}`}>SANS</button>
-                <button onClick={() => handleUpdate({ fontFamily: 3 })} className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold tracking-tight transition-all ${fontFamily === 3 ? 'bg-brand text-white shadow-md' : 'text-gray-500 hover:bg-white dark:hover:bg-gray-700'}`}>MONO</button>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[16, 20, 28, 36].map(s => (
-                  <button key={s} onClick={() => handleUpdate({ fontSize: s })} className={`py-1.5 rounded-lg text-[10px] font-bold font-mono transition-all ${fontSize === s ? 'bg-gray-800 dark:bg-gray-100 text-white dark:text-gray-900 shadow-lg' : 'text-gray-500 hover:bg-white dark:hover:bg-white/5'}`}>
-                    {s}
-                  </button>
-                ))}
+        {activeTab === 'arrange' && (
+          <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-right-2 duration-300">
+            {/* Layers Section */}
+            <div className="space-y-3">
+              <SectionLabel>Layer Order</SectionLabel>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => onLayerChange('front')} disabled={!hasSelection} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[10px] font-bold text-gray-600 dark:text-gray-400 hover:text-brand hover:border-brand/30 transition-all disabled:opacity-20">
+                  <BringToFront size={14} /> Bring to Front
+                </button>
+                <button onClick={() => onLayerChange('back')} disabled={!hasSelection} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[10px] font-bold text-gray-600 dark:text-gray-400 hover:text-brand hover:border-brand/30 transition-all disabled:opacity-20">
+                  <SendToBack size={14} /> Send to Back
+                </button>
+                <button onClick={() => onLayerChange('forward')} disabled={!hasSelection} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[10px] font-bold text-gray-600 dark:text-gray-400 hover:text-brand hover:border-brand/30 transition-all disabled:opacity-20">
+                  <ChevronUp size={14} /> Bring Forward
+                </button>
+                <button onClick={() => onLayerChange('backward')} disabled={!hasSelection} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[10px] font-bold text-gray-600 dark:text-gray-400 hover:text-brand hover:border-brand/30 transition-all disabled:opacity-20">
+                  <ChevronDown size={14} /> Send Backward
+                </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Arrange / Layers */}
-        {(hasSelection || true) && (
-          <div>
-            <SectionLabel>Arrange</SectionLabel>
-            <div className="grid grid-cols-4 gap-2">
-              <IconButton onClick={() => onLayerChange('back')} icon={SendToBack} title="Send to Back" disabled={!hasSelection} />
-              <IconButton onClick={() => onLayerChange('backward')} icon={ChevronDown} title="Send Backward" disabled={!hasSelection} />
-              <IconButton onClick={() => onLayerChange('forward')} icon={ChevronUp} title="Bring Forward" disabled={!hasSelection} />
-              <IconButton onClick={() => onLayerChange('front')} icon={BringToFront} title="Bring to Front" disabled={!hasSelection} />
+            {/* Alignment Section */}
+            <div className="space-y-3">
+              <SectionLabel>Align Objects</SectionLabel>
+              <div className="bg-gray-100/50 dark:bg-gray-800/20 p-2 rounded-2xl border border-gray-100 dark:border-gray-800/50">
+                <div className="grid grid-cols-3 gap-1">
+                  <IconButton onClick={() => onAlign('left')} icon={AlignLeft} title="Left" disabled={!hasMultipleSelection} />
+                  <IconButton onClick={() => onAlign('center')} icon={AlignCenter} title="Center" disabled={!hasMultipleSelection} />
+                  <IconButton onClick={() => onAlign('right')} icon={AlignRight} title="Right" disabled={!hasMultipleSelection} />
+                  <IconButton onClick={() => onAlign('top')} icon={AlignJustify} title="Top" disabled={!hasMultipleSelection} />
+                  <IconButton onClick={() => onAlign('middle')} icon={AlignVerticalDistributeCenter} title="Middle" disabled={!hasMultipleSelection} />
+                  <IconButton onClick={() => onAlign('bottom')} icon={AlignJustify} title="Bottom" disabled={!hasMultipleSelection} />
+                </div>
+              </div>
+            </div>
 
-              <div className="col-span-4 h-[1px] bg-gray-100 dark:bg-gray-800 my-1" />
-
-              <IconButton onClick={onGroup} icon={Group} title="Group" disabled={!hasMultipleSelection} />
-              <IconButton onClick={onUngroup} icon={Ungroup} title="Ungroup" disabled={!hasSelection} />
-              <IconButton onClick={onToggleLock} icon={isLocked ? Lock : Unlock} title={isLocked ? "Unlock" : "Lock"} active={isLocked} disabled={!hasSelection} />
-              <div /> {/* Spacer */}
+            {/* Organization Section */}
+            <div className="space-y-3">
+              <SectionLabel>Organization</SectionLabel>
+              <div className="flex gap-2">
+                <button onClick={onGroup} disabled={!hasMultipleSelection} className="flex-1 flex flex-col items-center gap-1.5 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[9px] font-bold uppercase tracking-wider text-gray-500 hover:text-brand transition-all disabled:opacity-20">
+                  <Group size={16} /> Group
+                </button>
+                <button onClick={onUngroup} disabled={!hasSelection} className="flex-1 flex flex-col items-center gap-1.5 p-3 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800/50 text-[9px] font-bold uppercase tracking-wider text-gray-500 hover:text-brand transition-all disabled:opacity-20">
+                  <Ungroup size={16} /> Ungroup
+                </button>
+                <button onClick={onToggleLock} disabled={!hasSelection} className={`flex-1 flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all disabled:opacity-20 text-[9px] font-bold uppercase tracking-wider ${isLocked ? 'bg-orange-500/10 border-orange-500/20 text-orange-500' : 'bg-gray-50 dark:bg-gray-800/30 border-gray-100 dark:border-gray-800/50 text-gray-500 hover:text-brand'}`}>
+                  {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                  {isLocked ? 'Locked' : 'Lock'}
+                </button>
+              </div>
             </div>
           </div>
         )}
 
       </div>
 
-      {/* Footer Actions */}
-      <div className="p-4 pt-1 mb-2 bg-transparent flex flex-col gap-2">
+      {/* Action Footer */}
+      <div className="p-4 pt-2 pb-5 bg-transparent flex flex-col gap-2 border-t border-gray-100 dark:border-gray-800">
         {hasSelection && (
           <button
             onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))}
-            className="w-full py-3.5 rounded-2xl bg-red-500/10 text-red-500 font-bold text-xs uppercase tracking-widest hover:bg-red-500 hover:text-white hover:shadow-lg hover:shadow-red-500/20 transition-all duration-300 flex items-center justify-center gap-2.5 group"
+            className="w-full py-2.5 rounded-xl bg-red-500 text-white font-bold text-[10px] uppercase tracking-wider hover:bg-red-600 shadow-sm transition-all flex items-center justify-center gap-2 group"
           >
-            <Trash2 size={15} className="group-hover:rotate-12 transition-transform" />
-            Delete Element
+            <Trash2 size={13} />
+            Delete
           </button>
         )}
         <button
           onClick={clearCanvas}
-          className="w-full py-2.5 rounded-xl text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-all text-[11px] font-bold uppercase tracking-wide flex items-center justify-center gap-2"
+          className="w-full py-2.5 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2"
         >
-          <Eraser size={14} /> Clear Canvas
+          <Eraser size={13} /> Clear Canvas
         </button>
       </div>
-
     </div>
   );
 });
+
 
 export default PropertiesPanel;

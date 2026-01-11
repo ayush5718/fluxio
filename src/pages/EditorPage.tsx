@@ -245,6 +245,114 @@ const EditorPage = () => {
     };
     const handleExport = () => setIsExportModalOpen(true);
 
+    const handleLayerChange = (action: 'front' | 'back' | 'forward' | 'backward') => {
+        const selectedIds = new Set(appState.selectedElementIds);
+        if (selectedIds.size === 0) return;
+
+        const selected = elements.filter(el => selectedIds.has(el.id));
+        const nonSelected = elements.filter(el => !selectedIds.has(el.id));
+
+        let nextElements = [...elements];
+
+        switch (action) {
+            case 'front':
+                nextElements = [...nonSelected, ...selected];
+                break;
+            case 'back':
+                nextElements = [...selected, ...nonSelected];
+                break;
+            case 'forward': {
+                // Find the index of the element that is furthest to the front (highest index)
+                let maxIndex = -1;
+                elements.forEach((el, i) => { if (selectedIds.has(el.id)) maxIndex = i; });
+                if (maxIndex < elements.length - 1) {
+                    const nextEl = elements[maxIndex + 1];
+                    const nextElIndexInNonSelected = nonSelected.indexOf(nextEl);
+                    nonSelected.splice(nextElIndexInNonSelected + 1, 0, ...selected);
+                    nextElements = nonSelected;
+                }
+                break;
+            }
+            case 'backward': {
+                // Find the index of the element that is furthest to the back (lowest index)
+                let minIndex = elements.length;
+                elements.forEach((el, i) => { if (selectedIds.has(el.id)) minIndex = Math.min(minIndex, i); });
+                if (minIndex > 0) {
+                    const prevEl = elements[minIndex - 1];
+                    const prevElIndexInNonSelected = nonSelected.indexOf(prevEl);
+                    nonSelected.splice(prevElIndexInNonSelected, 0, ...selected);
+                    nextElements = nonSelected;
+                }
+                break;
+            }
+        }
+        updateElements(nextElements, true);
+    };
+
+    const handleGroup = () => {
+        if (appState.selectedElementIds.length < 2) return;
+        const groupId = crypto.randomUUID();
+        const nextElements = elements.map(el => {
+            if (appState.selectedElementIds.includes(el.id)) {
+                return { ...el, groupIds: [...(el.groupIds || []), groupId] };
+            }
+            return el;
+        });
+        updateElements(nextElements, true);
+    };
+
+    const handleUngroup = () => {
+        if (appState.selectedElementIds.length === 0) return;
+        const nextElements = elements.map(el => {
+            if (appState.selectedElementIds.includes(el.id) && el.groupIds && el.groupIds.length > 0) {
+                const newGroupIds = [...el.groupIds];
+                newGroupIds.pop();
+                return { ...el, groupIds: newGroupIds };
+            }
+            return el;
+        });
+        updateElements(nextElements, true);
+    };
+
+    const handleAlign = (type: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+        if (appState.selectedElementIds.length < 2) return;
+        const selected = elements.filter(el => appState.selectedElementIds.includes(el.id));
+
+        const minX = Math.min(...selected.map(el => el.x));
+        const maxX = Math.max(...selected.map(el => el.x + el.width));
+        const minY = Math.min(...selected.map(el => el.y));
+        const maxY = Math.max(...selected.map(el => el.y + el.height));
+
+        const centerX = minX + (maxX - minX) / 2;
+        const centerY = minY + (maxY - minY) / 2;
+
+        const nextElements = elements.map(el => {
+            if (appState.selectedElementIds.includes(el.id)) {
+                switch (type) {
+                    case 'left': return { ...el, x: minX };
+                    case 'center': return { ...el, x: centerX - el.width / 2 };
+                    case 'right': return { ...el, x: maxX - el.width };
+                    case 'top': return { ...el, y: minY };
+                    case 'middle': return { ...el, y: centerY - el.height / 2 };
+                    case 'bottom': return { ...el, y: maxY - el.height };
+                }
+            }
+            return el;
+        });
+        updateElements(nextElements, true);
+    };
+
+    const handleToggleLock = () => {
+        if (appState.selectedElementIds.length === 0) return;
+        const nextElements = elements.map(el => {
+            if (appState.selectedElementIds.includes(el.id)) {
+                return { ...el, isLocked: !el.isLocked };
+            }
+            return el;
+        });
+        updateElements(nextElements, true);
+    };
+
     const handleTextBlur = () => {
         if (appState.editingElementId) {
             setElements(prev => {
@@ -355,7 +463,7 @@ const EditorPage = () => {
 
             <PropertiesPanel appState={appState} setAppState={setAppState} elements={elements} onUpdateElement={updateSelectedElements} undo={undo} redo={redo}
                 clearCanvas={() => { setElements([]); clearHistory(); }} openGemini={() => setIsGeminiOpen(true)}
-                onLayerChange={() => { }} onGroup={() => { }} onUngroup={() => { }} onAlign={() => { }} onToggleLock={() => { }} />
+                onLayerChange={handleLayerChange} onGroup={handleGroup} onUngroup={handleUngroup} onAlign={handleAlign} onToggleLock={handleToggleLock} />
 
             <div className="fixed bottom-4 left-4 z-50 flex items-center gap-2">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-white/40 dark:bg-black/40 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-lg shadow-sm text-xs font-medium text-gray-600 dark:text-gray-300">
