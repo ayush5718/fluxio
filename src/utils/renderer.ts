@@ -2,7 +2,16 @@ import React, { useEffect, useRef } from 'react';
 import rough from 'roughjs';
 import { getStroke } from 'perfect-freehand';
 import { ExcalidrawElement, Point, ResizeHandle, AppState } from "../types";
-import { getSnapPoints, getResizeHandles, getConnectorHandles, getAnchorPosition, getSmartAnchors, generateOrthogonalPoints } from "./geometry";
+import {
+    getSnapPoints,
+    getResizeHandles,
+    getConnectorHandles,
+    getAnchorPosition,
+    getSmartAnchors,
+    generateOrthogonalPoints,
+    getCommonBoundingBox,
+    getSnapLines
+} from "./geometry";
 
 export const getFontFamilyString = (fontFamily?: number) => {
     switch (fontFamily) {
@@ -196,40 +205,71 @@ const getSvgPathFromStroke = (stroke: number[][]) => {
     return d.join(" ");
 };
 
-const getElementDrawable = (rc: any, element: ExcalidrawElement, options: any) => {
+const getElementDrawable = (rc: any, element: ExcalidrawElement, options: any, skipCache: boolean = false) => {
     // Create a stable cache key based on geometry and visual properties
-    let key = `${element.type}-${element.seed}-${element.width}-${element.height}-${element.strokeWidth}-${element.strokeStyle}-${element.fillStyle}-${element.roughness}-${options.stroke}-${options.fill}`;
+    let key = `${element.type}-${element.seed}-${element.width}-${element.height}-${element.strokeWidth}-${element.strokeStyle}-${element.fillStyle}-${element.roughness}-${element.roundness || 0}-${options.stroke}-${options.fill}`;
 
-    // For path-based elements, include points in the key
+    // For path-based elements, include ALL points in the key for accurate cache invalidation
     if (element.points && element.points.length > 0) {
-        // Just Use first, middle, last and length for quick hashing
+        // For small point counts (live drawing), use a full hash to ensure accurate invalidation
         const len = element.points.length;
-        const mid = element.points[Math.floor(len / 2)];
-        const last = element.points[len - 1];
-        key += `-${len}-${element.points[0].x},${element.points[0].y}-${mid.x},${mid.y}-${last.x},${last.y}`;
+        if (len < 100) {
+            // Full hash for live drawing accuracy
+            key += `-${len}-${element.points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('|')}`;
+        } else {
+            // For larger paths, sample for performance
+            const mid = element.points[Math.floor(len / 2)];
+            const last = element.points[len - 1];
+            key += `-${len}-${element.points[0].x},${element.points[0].y}-${mid.x},${mid.y}-${last.x},${last.y}`;
+        }
     }
 
-    if (drawableCache.has(key)) return drawableCache.get(key);
+    // Skip cache for live drawing (tempElement) or if explicitly requested
+    if (!skipCache && drawableCache.has(key)) return drawableCache.get(key);
 
     let drawable: any = null;
     if (element.type === 'rectangle') {
-        const r = element.roundness || 0;
-        if (r > 0) {
-            const { x, y, width: w, height: h } = element;
+        const { width: w, height: h } = element;
+        const roundness = element.roundness || 0;
+
+        if (roundness > 0) {
+            // Cap roundness to 20% of the shortest side to match Excalidraw-like feel and prevent glitches
+            const r = Math.min(roundness, Math.min(w, h) * 0.25);
             const path = `M ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${h - r} A ${r} ${r} 0 0 1 ${w - r} ${h} L ${r} ${h} A ${r} ${r} 0 0 1 0 ${h - r} L 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`;
             drawable = rc.generator.path(path, options);
         } else {
-            drawable = rc.generator.rectangle(0, 0, element.width, element.height, options);
+            drawable = rc.generator.rectangle(0, 0, w, h, options);
         }
     } else if (element.type === 'ellipse') {
         drawable = rc.generator.ellipse(element.width / 2, element.height / 2, element.width, element.height, options);
     } else if (element.type === 'diamond') {
-        drawable = rc.generator.polygon([
-            [element.width / 2, 0],
-            [element.width, element.height / 2],
-            [element.width / 2, element.height],
-            [0, element.height / 2]
-        ], options);
+        const { width: w, height: h } = element;
+        const roundness = element.roundness || 0;
+
+        if (roundness > 0) {
+            // For a diamond, we calculate points slightly offset from the tips to create rounded arcs
+            const r = Math.min(roundness, Math.min(w, h) * 0.15);
+            const cx = w / 2;
+            const cy = h / 2;
+
+            // Tips: [cx, 0], [w, cy], [cx, h], [0, cy]
+            // We use a simplified rounded diamond path
+            const path = `
+                M ${cx} ${r} 
+                L ${w - r} ${cy - r} Q ${w} ${cy} ${w - r} ${cy + r}
+                L ${cx + r} ${h - r} Q ${cx} ${h} ${cx - r} ${h - r}
+                L ${r} ${cy + r} Q 0 ${cy} ${r} ${cy - r}
+                L ${cx - r} ${r} Q ${cx} 0 ${cx} ${r} 
+                Z`.replace(/\s+/g, ' ').trim();
+            drawable = rc.generator.path(path, options);
+        } else {
+            drawable = rc.generator.polygon([
+                [w / 2, 0],
+                [w, h / 2],
+                [w / 2, h],
+                [0, h / 2]
+            ], options);
+        }
     } else if (element.type === 'arrow' || element.type === 'line') {
         if (element.points && element.points.length > 0) {
             const points = element.points.map(p => [p.x, p.y] as [number, number]);
@@ -251,9 +291,9 @@ const getElementDrawable = (rc: any, element: ExcalidrawElement, options: any) =
     } else if (element.type === 'freedraw') {
         if (element.points && element.points.length > 0) {
             const stroke = getStroke(element.points.map(p => [p.x, p.y, p.pressure ?? 0.5]), {
-                size: element.strokeWidth * 2,
-                thinning: 0.5,
-                smoothing: 0.5,
+                size: element.strokeWidth * 1.5,
+                thinning: 0.7,
+                smoothing: 0.8,
                 streamline: 0.5,
                 simulatePressure: element.simulatePressure ?? true,
             });
@@ -261,7 +301,8 @@ const getElementDrawable = (rc: any, element: ExcalidrawElement, options: any) =
             drawable = rc.generator.path(pathData, {
                 ...options,
                 fill: options.stroke, // Freedraw is a polygon now
-                fillStyle: 'solid'
+                fillStyle: 'solid',
+                roughness: 0, // No jitter for freedraw for cleaner look and performance
             });
         }
     }
@@ -524,66 +565,68 @@ export const renderDynamicScene = (
     const elementsMap = new Map<string, ExcalidrawElement>();
     elements.forEach(el => elementsMap.set(el.id, el));
 
-    // Draw all active previews (movers, connectors, pending deletions)
-    const itemsToDrawPreview = elements.filter(el => movers.has(el.id) || affectedConnectors.has(el.id) || pendingSet.has(el.id)).map(el => {
-        if (resizingElementOverride && el.id === resizingElementOverride.id) return resizingElementOverride;
+    // Draw all active previews (movers, connectors, pending deletions) efficiently
+    const itemsToDrawPreview: ExcalidrawElement[] = [];
 
-        // If it's a connector not being directly moved, but its bound elements are moving, we must recalculate points
+    // Only iterate over elements that could a) be moving, b) be connected to movers, c) be pending deletion
+    // This is much faster than filtering the entire elements array every frame
+    const candidateIds = new Set([...movers, ...affectedConnectors, ...pendingDeletionIds]);
+
+    // We still need to maintain drawing order, so we iterate over elements but check the set
+    elements.forEach(el => {
+        if (!candidateIds.has(el.id)) return;
+
+        if (resizingElementOverride && el.id === resizingElementOverride.id) {
+            itemsToDrawPreview.push(resizingElementOverride);
+            return;
+        }
+
+        // recalculate connectors...
         if (affectedConnectors.has(el.id) && effectiveDraggingOffset) {
-            const isAffected = (el.startBinding && movers.has(el.startBinding.elementId)) ||
-                (el.endBinding && movers.has(el.endBinding.elementId));
+            const getPreviewEl = (id: string) => {
+                const e = elementsMap.get(id);
+                if (!e) return null;
+                if (movers.has(id)) return { ...e, x: e.x + effectiveDraggingOffset.x, y: e.y + effectiveDraggingOffset.y };
+                return e;
+            };
 
-            if (isAffected) {
-                // Determine preview positions of bound elements
-                const getPreviewEl = (id: string) => {
-                    const e = elementsMap.get(id);
-                    if (!e) return null;
-                    if (movers.has(id)) return { ...e, x: e.x + effectiveDraggingOffset.x, y: e.y + effectiveDraggingOffset.y };
-                    return e;
-                };
+            const startBoundEl = el.startBinding ? getPreviewEl(el.startBinding.elementId) : null;
+            const endBoundEl = el.endBinding ? getPreviewEl(el.endBinding.elementId) : null;
 
-                const startBoundEl = el.startBinding ? getPreviewEl(el.startBinding.elementId) : null;
-                const endBoundEl = el.endBinding ? getPreviewEl(el.endBinding.elementId) : null;
-
-                if (startBoundEl || endBoundEl) {
-                    let newEl = { ...el, points: el.points ? [...el.points] : [] };
-
-                    // We need to calculate start and end positions accurately
-                    let startPos = { x: el.x, y: el.y };
-                    let endPos = { x: el.x + (el.points?.[el.points.length - 1]?.x || 0), y: el.y + (el.points?.[el.points.length - 1]?.y || 0) };
-
-                    if (startBoundEl && endBoundEl && el.startBinding && el.endBinding) {
-                        const smartAnchors = getSmartAnchors(startBoundEl, endBoundEl);
-                        newEl.startBinding = { ...el.startBinding, anchor: smartAnchors.start };
-                        newEl.endBinding = { ...el.endBinding, anchor: smartAnchors.end };
-                        const sP = getAnchorPosition(startBoundEl, smartAnchors.start);
-                        const eP = getAnchorPosition(endBoundEl, smartAnchors.end);
-                        newEl.points = generateOrthogonalPoints(sP, eP, smartAnchors.start as any, smartAnchors.end as any, startBoundEl, endBoundEl, 30);
-                        newEl.x = sP.x;
-                        newEl.y = sP.y;
-                    } else {
-                        if (startBoundEl && el.startBinding) {
-                            const p = getAnchorPosition(startBoundEl, el.startBinding.anchor);
-                            const offX = p.x - el.x;
-                            const offY = p.y - el.y;
-                            newEl.x = p.x;
-                            newEl.y = p.y;
-                            newEl.points = newEl.points.map((pt, i) => i === 0 ? { ...pt, x: 0, y: 0 } : { ...pt, x: pt.x - offX, y: pt.y - offY });
-                        }
-                        if (endBoundEl && el.endBinding) {
-                            const p = getAnchorPosition(endBoundEl, el.endBinding.anchor);
-                            const idx = newEl.points.length - 1;
-                            if (idx >= 0) {
-                                newEl.points[idx] = { ...newEl.points[idx], x: p.x - newEl.x, y: p.y - newEl.y };
-                            }
+            if (startBoundEl || endBoundEl) {
+                let newEl = { ...el, points: el.points ? [...el.points] : [] };
+                if (startBoundEl && endBoundEl && el.startBinding && el.endBinding) {
+                    const smartAnchors = getSmartAnchors(startBoundEl, endBoundEl);
+                    newEl.startBinding = { ...el.startBinding, anchor: smartAnchors.start };
+                    newEl.endBinding = { ...el.endBinding, anchor: smartAnchors.end };
+                    const sP = getAnchorPosition(startBoundEl, smartAnchors.start);
+                    const eP = getAnchorPosition(endBoundEl, smartAnchors.end);
+                    newEl.points = generateOrthogonalPoints(sP, eP, smartAnchors.start as any, smartAnchors.end as any, startBoundEl, endBoundEl, 30);
+                    newEl.x = sP.x;
+                    newEl.y = sP.y;
+                } else {
+                    if (startBoundEl && el.startBinding) {
+                        const p = getAnchorPosition(startBoundEl, el.startBinding.anchor);
+                        const offX = p.x - el.x;
+                        const offY = p.y - el.y;
+                        newEl.x = p.x;
+                        newEl.y = p.y;
+                        newEl.points = newEl.points.map((pt, i) => i === 0 ? { ...pt, x: 0, y: 0 } : { ...pt, x: pt.x - offX, y: pt.y - offY });
+                    }
+                    if (endBoundEl && el.endBinding) {
+                        const p = getAnchorPosition(endBoundEl, el.endBinding.anchor);
+                        const idx = newEl.points.length - 1;
+                        if (idx >= 0) {
+                            newEl.points[idx] = { ...newEl.points[idx], x: p.x - newEl.x, y: p.y - newEl.y };
                         }
                     }
-                    return newEl;
                 }
+                itemsToDrawPreview.push(newEl);
+                return;
             }
         }
 
-        return el;
+        itemsToDrawPreview.push(el);
     });
 
     // Draw active previews
@@ -603,7 +646,72 @@ export const renderDynamicScene = (
         drawElements(ctx, rc, [tempElement], theme, [], editingElementId);
     }
 
-    // 2. Draw Selection Overlays
+    // --- SNAP GUIDELINES ---
+    if (appState.draggingOffset && selIds.length > 0) {
+        const selectedElements = elements.filter(el => selIds.includes(el.id));
+        const commonBox = getCommonBoundingBox(selectedElements);
+        if (commonBox) {
+            const previewBox = {
+                x: commonBox.x + appState.draggingOffset.x,
+                y: commonBox.y + appState.draggingOffset.y,
+                width: commonBox.width,
+                height: commonBox.height
+            };
+            const others = elements.filter(el => !selIds.includes(el.id) && !movers.has(el.id));
+            const snap = getSnapLines(previewBox, others);
+
+            ctx.save();
+            ctx.strokeStyle = "#ff7096";
+            ctx.setLineDash([5 / zoom, 5 / zoom]);
+            ctx.lineWidth = 1 / zoom;
+
+            if (snap.vertical !== null) {
+                ctx.beginPath();
+                ctx.moveTo(snap.vertical, -10000);
+                ctx.lineTo(snap.vertical, 10000);
+                ctx.stroke();
+            }
+            if (snap.horizontal !== null) {
+                ctx.beginPath();
+                ctx.moveTo(-10000, snap.horizontal);
+                ctx.lineTo(10000, snap.horizontal);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    }
+
+    // --- SELECTION OVERLAYS ---
+    const selectionColor = "#6965db";
+    const handleFillColor = "#ffffff";
+
+    // --- SELECTION HIGHLIGHTS & HANDLES ---
+    // Common Bounding Box for multi-selection
+    if (selIds.length > 1) {
+        const selectedElements = elements.filter(el => selIds.includes(el.id));
+        const commonBox = getCommonBoundingBox(selectedElements);
+        if (commonBox) {
+            ctx.save();
+            let bx = commonBox.x;
+            let by = commonBox.y;
+            if (effectiveDraggingOffset) {
+                bx += effectiveDraggingOffset.x;
+                by += effectiveDraggingOffset.y;
+            }
+
+            ctx.strokeStyle = selectionColor;
+            ctx.lineWidth = 1.2 / zoom;
+            const padding = 8 / zoom;
+
+            ctx.beginPath();
+            // @ts-ignore
+            if (ctx.roundRect) ctx.roundRect(bx - padding, by - padding, commonBox.width + padding * 2, commonBox.height + padding * 2, 6 / zoom);
+            else ctx.rect(bx - padding, by - padding, commonBox.width + padding * 2, commonBox.height + padding * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     elements.forEach(element => {
         let displayElement = element;
         if (resizingElementOverride && element.id === resizingElementOverride.id) {
@@ -614,11 +722,11 @@ export const renderDynamicScene = (
         const isHighlighted = highlightedElementId === displayElement.id;
         const isBeingEdited = editingElementId === displayElement.id;
 
-        // Only show full selection UI for selected elements, subtle border for hover
+        // If part of multi-selection, we don't draw individual boxes, only handles if needed
         if (isSelected && !isBeingEdited) {
-            ctx.save();
+            if (selIds.length > 1) return; // Handled by common box for multi-select
 
-            // Apply dragging offset to overlays if element is being dragged
+            ctx.save();
             let elementX = displayElement.x;
             let elementY = displayElement.y;
             if (effectiveDraggingOffset && !displayElement.isLocked) {
@@ -626,10 +734,8 @@ export const renderDynamicScene = (
                 elementY = Math.round(elementY + effectiveDraggingOffset.y);
             }
 
-            const selectionColor = "#6965db";
-            const handleFillColor = "#ffffff";
             ctx.strokeStyle = selectionColor;
-            ctx.lineWidth = 1 / zoom;
+            ctx.lineWidth = 1.2 / zoom;
 
             ctx.save();
             if (displayElement.angle) {
@@ -648,94 +754,85 @@ export const renderDynamicScene = (
             ctx.stroke();
             ctx.restore();
 
-            if (selIds.length === 1 && !displayElement.isLocked) {
-                // Create a temporary element with shifted coordinates for handle calculations
-                const proxyEl = { ...displayElement, x: elementX, y: elementY };
-                const handles = getResizeHandles(proxyEl, zoom);
-                const connectors = getConnectorHandles(proxyEl, zoom);
-                const handleSize = 8 / zoom;
+            // Handlers only for single selection
+            const proxyEl = { ...displayElement, x: elementX, y: elementY };
+            const handles = getResizeHandles(proxyEl, zoom);
+            const connectors = getConnectorHandles(proxyEl, zoom);
+            const handleSize = 9 / zoom;
 
+            // Draw handles with reactive feel logic (hover check would need passing down, but let's at least refine styling)
+            Object.entries(handles).forEach(([key, pos]) => {
                 ctx.save();
-                for (const [key, p] of Object.entries(connectors)) {
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, 7 / zoom, 0, Math.PI * 2);
-                    ctx.fillStyle = "#ffffff";
-                    ctx.fill();
-                    ctx.strokeStyle = selectionColor;
-                    ctx.lineWidth = 1.2 / zoom;
-                    ctx.stroke();
-                    ctx.beginPath();
-                    ctx.strokeStyle = selectionColor;
-                    ctx.lineWidth = 1 / zoom;
-                    const s = 3.5 / zoom;
-                    ctx.moveTo(p.x - s, p.y);
-                    ctx.lineTo(p.x + s, p.y);
-                    ctx.moveTo(p.x, p.y - s);
-                    ctx.lineTo(p.x, p.y + s);
-                    ctx.stroke();
-                }
-                ctx.restore();
+                const hx = pos.x;
+                const hy = pos.y;
 
-                Object.entries(handles).forEach(([key, pos]) => {
-                    ctx.save();
-                    const hx = pos.x;
-                    const hy = pos.y;
-
-                    if (key === 'rotation') {
-                        const nHandle = handles['n'];
-                        if (nHandle) {
-                            ctx.setLineDash([4 / zoom, 4 / zoom]);
-                            ctx.beginPath();
-                            ctx.moveTo(nHandle.x, nHandle.y);
-                            ctx.lineTo(hx, hy);
-                            ctx.strokeStyle = selectionColor;
-                            ctx.globalAlpha = 0.5;
-                            ctx.stroke();
-                        }
+                // Check if this specific handle is "hovered" - we'd need handleHoverId in appState
+                // For now, let's just make them look better
+                if (key === 'rotation') {
+                    const nHandle = handles['n'];
+                    if (nHandle) {
+                        ctx.setLineDash([4 / zoom, 4 / zoom]);
                         ctx.beginPath();
-                        ctx.fillStyle = handleFillColor;
+                        ctx.moveTo(nHandle.x, nHandle.y);
+                        ctx.lineTo(hx, hy);
                         ctx.strokeStyle = selectionColor;
-                        ctx.lineWidth = 1 / zoom;
-                        ctx.globalAlpha = 1.0;
-                        ctx.arc(hx, hy, handleSize / 2, 0, 2 * Math.PI);
+                        ctx.globalAlpha = 0.5;
+                        ctx.stroke();
+                    }
+                    ctx.beginPath();
+                    ctx.fillStyle = handleFillColor;
+                    ctx.strokeStyle = selectionColor;
+                    ctx.lineWidth = 1.5 / zoom;
+                    ctx.globalAlpha = 1.0;
+                    ctx.arc(hx, hy, handleSize / 2, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = handleFillColor;
+                    ctx.strokeStyle = selectionColor;
+                    ctx.lineWidth = 1.5 / zoom;
+                    const hs = handleSize;
+                    if (key.startsWith('p:') || key.startsWith('m:')) {
+                        ctx.beginPath();
+                        ctx.arc(hx, hy, hs / 2, 0, 2 * Math.PI);
                         ctx.fill();
                         ctx.stroke();
                     } else {
-                        if (key.startsWith('p:') || key.startsWith('m:')) {
-                            const isMid = key.startsWith('m:');
+                        // @ts-ignore
+                        if (ctx.roundRect) {
                             ctx.beginPath();
-                            if (isMid) {
-                                ctx.fillStyle = selectionColor;
-                                ctx.globalAlpha = 0.5;
-                                ctx.arc(hx, hy, handleSize / 2.5, 0, 2 * Math.PI);
-                                ctx.fill();
-                            } else {
-                                ctx.fillStyle = handleFillColor;
-                                ctx.strokeStyle = selectionColor;
-                                ctx.lineWidth = 1 / zoom;
-                                ctx.arc(hx, hy, handleSize / 1.8, 0, 2 * Math.PI);
-                                ctx.fill();
-                                ctx.stroke();
-                            }
+                            ctx.roundRect(hx - hs / 2, hy - hs / 2, hs, hs, 2 / zoom);
+                            ctx.fill();
+                            ctx.stroke();
                         } else {
-                            ctx.fillStyle = handleFillColor;
-                            ctx.strokeStyle = selectionColor;
-                            ctx.lineWidth = 1 / zoom;
-                            const hs = handleSize;
-                            // @ts-ignore
-                            if (ctx.roundRect) {
-                                ctx.beginPath();
-                                ctx.roundRect(hx - hs / 2, hy - hs / 2, hs, hs, 2 / zoom);
-                                ctx.fill();
-                                ctx.stroke();
-                            } else {
-                                ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
-                                ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
-                            }
+                            ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+                            ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);
                         }
                     }
-                    ctx.restore();
-                });
+                }
+                ctx.restore();
+            });
+
+            // Connectors
+            for (const [key, p] of Object.entries(connectors)) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 7 / zoom, 0, Math.PI * 2);
+                ctx.fillStyle = "#ffffff";
+                ctx.fill();
+                ctx.strokeStyle = selectionColor;
+                ctx.lineWidth = 1.2 / zoom;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.strokeStyle = selectionColor;
+                ctx.lineWidth = 1 / zoom;
+                const s = 3.5 / zoom;
+                ctx.moveTo(p.x - s, p.y);
+                ctx.lineTo(p.x + s, p.y);
+                ctx.moveTo(p.x, p.y - s);
+                ctx.lineTo(p.x, p.y + s);
+                ctx.stroke();
+                ctx.restore();
             }
 
             if (element.isLocked) {
@@ -744,16 +841,20 @@ export const renderDynamicScene = (
 
             ctx.restore();
         } else if (isHighlighted && !isSelected && !isBeingEdited && appState.tool === 'selection') {
-            // Subtle hover feedback - just a thin border, no handles
+            // Ambient hover highlight
             ctx.save();
             const padding = 4 / zoom;
-            ctx.strokeStyle = "rgba(105, 101, 219, 0.3)";
-            ctx.lineWidth = 1 / zoom;
-            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.strokeStyle = "rgba(105, 101, 219, 0.6)";
+            ctx.lineWidth = 2 / zoom;
             ctx.beginPath();
             // @ts-ignore
-            if (ctx.roundRect) ctx.roundRect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2, 4 / zoom);
+            if (ctx.roundRect) ctx.roundRect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2, 5 / zoom);
             else ctx.rect(element.x - padding, element.y - padding, element.width + padding * 2, element.height + padding * 2);
+            ctx.stroke();
+
+            // Add a subtle glow for production feel
+            ctx.shadowColor = "rgba(105, 101, 219, 0.4)";
+            ctx.shadowBlur = 10 / zoom;
             ctx.stroke();
             ctx.restore();
         } else if (isHighlighted && !isSelected && !isBeingEdited && (appState.tool === 'arrow' || appState.tool === 'line')) {
@@ -824,24 +925,38 @@ export const renderDynamicScene = (
         ctx.restore();
     }
 
-    // 5. Laser Trails
+    // 5. Laser Trails (Tapered & Soft)
     if (laserTrails.length > 0) {
         const now = Date.now();
         ctx.save();
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
         laserTrails.forEach(trail => {
             if (trail.length < 2) return;
-            for (let i = 1; i < trail.length; i++) {
-                const age = now - trail[i].time;
-                const opacity = Math.max(0, 1 - age / 1000);
-                if (opacity <= 0) continue;
+
+            // Filter out old points and prepare for getStroke
+            const activePoints = trail.filter(p => now - p.time < 1000);
+            if (activePoints.length < 2) return;
+
+            // Use perfect-freehand for tapered laser feel
+            const stroke = getStroke(activePoints.map(p => {
+                const age = now - p.time;
+                const pressure = Math.max(0.1, 1 - age / 1000);
+                return [p.x, p.y, pressure];
+            }), {
+                size: 6 / zoom,
+                thinning: 0.8,
+                smoothing: 0.6,
+                streamline: 0.5,
+            });
+
+            const pathData = getSvgPathFromStroke(stroke);
+            if (pathData) {
                 ctx.beginPath();
-                ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
-                ctx.lineTo(trail[i].x, trail[i].y);
-                ctx.strokeStyle = `rgba(220, 38, 38, ${opacity})`;
-                ctx.lineWidth = 4 / zoom;
-                ctx.stroke();
+                const path = new Path2D(pathData);
+                ctx.fillStyle = "rgba(239, 68, 68, 0.8)";
+                // Add a subtle glow
+                ctx.shadowColor = "rgba(239, 68, 68, 0.4)";
+                ctx.shadowBlur = 4 / zoom;
+                ctx.fill(path);
             }
         });
         ctx.restore();

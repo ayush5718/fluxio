@@ -13,14 +13,40 @@ export const getPointerPos = (e: React.MouseEvent | MouseEvent | { clientX: numb
 };
 
 export const getElementBounds = (element: ExcalidrawElement) => {
+    let { x, y, width: w, height: h } = element;
+    if (element.points && element.points.length > 0) {
+        const xs = element.points.map(p => p.x);
+        const ys = element.points.map(p => p.y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const maxX = Math.max(...xs);
+        const maxY = Math.max(...ys);
+        x = element.x + minX;
+        y = element.y + minY;
+        w = maxX - minX;
+        h = maxY - minY;
+    }
     return {
-        x: element.x,
-        y: element.y,
-        w: element.width,
-        h: element.height,
-        cx: element.x + element.width / 2,
-        cy: element.y + element.height / 2
+        x,
+        y,
+        w,
+        h,
+        cx: x + w / 2,
+        cy: y + h / 2
     };
+};
+
+export const getCommonBoundingBox = (selectedElements: ExcalidrawElement[]) => {
+    if (selectedElements.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selectedElements.forEach(el => {
+        const { x, y, w, h } = getElementBounds(el);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w);
+        maxY = Math.max(maxY, y + h);
+    });
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 };
 
 const rotatePoint = (p: Point, center: Point, angle: number): Point => {
@@ -200,15 +226,57 @@ export const getElementsWithinRect = (x: number, y: number, width: number, heigh
 };
 
 export const getSnapPoints = (element: ExcalidrawElement) => {
-    const { x, y, width, height, angle = 0 } = element;
-    const center = { x: x + width / 2, y: y + height / 2 };
+    const { x, y, w, h, cx, cy } = getElementBounds(element);
+    const { angle = 0 } = element;
     const points = [
-        { x: x + width / 2, y: y, anchor: 'top' as AnchorPosition },
-        { x: x + width, y: y + height / 2, anchor: 'right' as AnchorPosition },
-        { x: x + width / 2, y: y + height, anchor: 'bottom' as AnchorPosition },
-        { x: x, y: y + height / 2, anchor: 'left' as AnchorPosition },
+        { x: cx, y: y, anchor: 'top' as AnchorPosition },
+        { x: x + w, y: cy, anchor: 'right' as AnchorPosition },
+        { x: cx, y: y + h, anchor: 'bottom' as AnchorPosition },
+        { x: x, y: cy, anchor: 'left' as AnchorPosition },
+        { x: cx, y: cy, anchor: 'center' as AnchorPosition },
     ];
-    return angle === 0 ? points : points.map(p => ({ ...rotatePoint(p, center, angle), anchor: p.anchor }));
+    return angle === 0 ? points : points.map(p => ({ ...rotatePoint(p, { x: cx, y: cy }, angle), anchor: p.anchor }));
+};
+
+export interface SnapLine {
+    type: 'vertical' | 'horizontal';
+    value: number;
+}
+
+export const getSnapLines = (draggedBounds: { x: number, y: number, width: number, height: number }, otherElements: ExcalidrawElement[], threshold: number = 5) => {
+    const verticalLines: { value: number, priority: number }[] = [];
+    const horizontalLines: { value: number, priority: number }[] = [];
+
+    const draggedX = [draggedBounds.x, draggedBounds.x + draggedBounds.width / 2, draggedBounds.x + draggedBounds.width];
+    const draggedY = [draggedBounds.y, draggedBounds.y + draggedBounds.height / 2, draggedBounds.y + draggedBounds.height];
+
+    otherElements.forEach(el => {
+        const { x, y, w, h, cx, cy } = getElementBounds(el);
+        const otherX = [x, cx, x + w];
+        const otherY = [y, cy, y + h];
+
+        draggedX.forEach(dx => {
+            otherX.forEach(ox => {
+                const diff = Math.abs(dx - ox);
+                if (diff < threshold) verticalLines.push({ value: ox, priority: diff });
+            });
+        });
+
+        draggedY.forEach(dy => {
+            otherY.forEach(oy => {
+                const diff = Math.abs(dy - oy);
+                if (diff < threshold) horizontalLines.push({ value: oy, priority: diff });
+            });
+        });
+    });
+
+    const bestVertical = verticalLines.sort((a, b) => a.priority - b.priority)[0];
+    const bestHorizontal = horizontalLines.sort((a, b) => a.priority - b.priority)[0];
+
+    return {
+        vertical: bestVertical ? bestVertical.value : null,
+        horizontal: bestHorizontal ? bestHorizontal.value : null
+    };
 };
 
 export const getClosestSnapPoint = (x: number, y: number, element: ExcalidrawElement) => {

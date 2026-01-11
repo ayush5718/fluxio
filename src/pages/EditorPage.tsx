@@ -91,12 +91,13 @@ const EditorPage = () => {
 
     useEffect(() => {
         if (appState.editingElementId && textAreaRef.current) {
-            // Small delay to ensure textarea is rendered and positioned
-            const timeoutId = setTimeout(() => {
-                textAreaRef.current?.focus();
-                textAreaRef.current?.select();
-            }, 10);
-            return () => clearTimeout(timeoutId);
+            const timer = setTimeout(() => {
+                if (textAreaRef.current) {
+                    textAreaRef.current.focus();
+                    textAreaRef.current.select();
+                }
+            }, 0);
+            return () => clearTimeout(timer);
         }
     }, [appState.editingElementId]);
 
@@ -409,6 +410,9 @@ const EditorPage = () => {
                 return (
                     <textarea ref={textAreaRef}
                         className="fixed bg-transparent outline-none resize-none border-none pointer-events-auto overflow-hidden p-0 m-0"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onPointerUp={(e) => e.stopPropagation()}
+                        onPointerMove={(e) => e.stopPropagation()}
                         style={{
                             left: (el.x * appState.zoom) + appState.pan.x,
                             top: ((isFrame ? el.y - 24 : el.y) * appState.zoom) + appState.pan.y,
@@ -451,6 +455,7 @@ const EditorPage = () => {
                         }}
                         onBlur={handleTextBlur}
                         onKeyDown={(e) => {
+                            e.stopPropagation();
                             if (e.key === 'Enter' && e.ctrlKey) e.currentTarget.blur();
                             if (e.key === 'Escape') e.currentTarget.blur();
                         }}

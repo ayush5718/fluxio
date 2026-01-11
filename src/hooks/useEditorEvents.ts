@@ -15,14 +15,16 @@ import {
     getIntersectingPoint,
     getSmartAnchors,
     generateOrthogonalPoints,
-    isPointInElementBounds
+    isPointInElementBounds,
+    getCommonBoundingBox,
+    getSnapLines
 } from '../utils/geometry';
 
 const CURSOR_THEME_COLOR = '%236965db';
 
-const MOVE_CURSOR = `url("data:image/svg+xml;utf8,<svg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'><circle cx='16' cy='16' r='10' fill='white' stroke='${CURSOR_THEME_COLOR}' stroke-width='1'/><path d='M16 10V22M16 10L14 12M16 10L18 12M16 22L14 20M16 22L18 20M10 16H22M10 16L12 14M10 16L12 18M22 16L20 14M22 16L20 18' stroke='${CURSOR_THEME_COLOR}' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>") 16 16, move`;
+const MOVE_CURSOR = `url("data:image/svg+xml;utf8,<svg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 4V20M12 4L9 7M12 4L15 7M12 20L9 17M12 20L15 17M4 12H20M4 12L7 9M4 12L7 15M20 12L17 9M20 12L17 15' stroke='${CURSOR_THEME_COLOR}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>") 12 12, move`;
 
-const GRABBING_CURSOR = `url("data:image/svg+xml;utf8,<svg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'><circle cx='16' cy='16' r='10' fill='${CURSOR_THEME_COLOR}' stroke='white' stroke-width='1'/><path d='M16 10V22M16 10L14 12M16 10L18 12M16 22L14 20M16 22L18 20M10 16H22M10 16L12 14M10 16L12 18M22 16L20 14M22 16L20 18' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>") 16 16, move`;
+const GRABBING_CURSOR = `url("data:image/svg+xml;utf8,<svg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 4V20M12 4L10 6M12 4L14 6M12 20L10 18M12 20L14 18M4 12H20M4 12L6 10M4 12L6 14M20 12L18 10M20 12L18 14' stroke='${CURSOR_THEME_COLOR}' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>") 12 12, move`;
 
 interface UseEditorEventsProps {
     elements: ExcalidrawElement[];
@@ -248,7 +250,8 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
         let pos = getPointerPosLocal(e);
         setCursorPos(pos);
 
-        if (appState.snapToGrid) {
+        // Snap to grid only for non-freehand tools
+        if (appState.snapToGrid && appState.tool !== 'freedraw' && appState.tool !== 'laser') {
             pos = {
                 x: Math.round(pos.x / 20) * 20,
                 y: Math.round(pos.y / 20) * 20
@@ -377,14 +380,49 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
 
             // Element dragging - only if no selection box is active
             if (appState.selectionStart && appState.tool === 'selection' && appState.selectedElementIds.length > 0 && !appState.selectionBox) {
-                const dx = pos.x - appState.selectionStart.x;
-                const dy = pos.y - appState.selectionStart.y;
+                let dx = pos.x - appState.selectionStart.x;
+                let dy = pos.y - appState.selectionStart.y;
                 if (dx === 0 && dy === 0) return;
+
+                // Professional Snapping Logic
+                const selectedElements = elements.filter(el => appState.selectedElementIds.includes(el.id));
+                const commonBox = getCommonBoundingBox(selectedElements);
+
+                if (commonBox) {
+                    const previewBox = {
+                        x: commonBox.x + dx,
+                        y: commonBox.y + dy,
+                        width: commonBox.width,
+                        height: commonBox.height
+                    };
+                    const others = elements.filter(el => !appState.selectedElementIds.includes(el.id));
+                    const snap = getSnapLines(previewBox, others);
+
+                    if (snap.vertical !== null) {
+                        // Adjust dx so the box snaps to snap.vertical
+                        // dx + commonBox.x + [offset] = snap.vertical
+                        // We check which part of the box is snapping (left, center, or right)
+                        const snapCandidates = [commonBox.x + dx, commonBox.x + dx + commonBox.width / 2, commonBox.x + dx + commonBox.width];
+                        const minDistIdx = snapCandidates.map((val, i) => Math.abs(val - snap.vertical!)).indexOf(Math.min(...snapCandidates.map(val => Math.abs(val - snap.vertical!))));
+
+                        if (minDistIdx === 0) dx = snap.vertical - commonBox.x;
+                        else if (minDistIdx === 1) dx = snap.vertical - (commonBox.x + commonBox.width / 2);
+                        else dx = snap.vertical - (commonBox.x + commonBox.width);
+                    }
+                    if (snap.horizontal !== null) {
+                        const snapCandidates = [commonBox.y + dy, commonBox.y + dy + commonBox.height / 2, commonBox.y + dy + commonBox.height];
+                        const minDistIdx = snapCandidates.map((val, i) => Math.abs(val - snap.horizontal!)).indexOf(Math.min(...snapCandidates.map(val => Math.abs(val - snap.horizontal!))));
+
+                        if (minDistIdx === 0) dy = snap.horizontal - commonBox.y;
+                        else if (minDistIdx === 1) dy = snap.horizontal - (commonBox.y + commonBox.height / 2);
+                        else dy = snap.horizontal - (commonBox.y + commonBox.height);
+                    }
+                }
 
                 // Professional Smoothness: Instead of updating the massive 'elements' array
                 // and triggering a full RoughJS static redraw, we just update a light 'offset'
                 // and let the dynamic layer handle the preview.
-                // setAppState(prev => ({ ...prev, draggingOffset: { x: dx, y: dy } }));
+                setAppState(prev => ({ ...prev, draggingOffset: { x: dx, y: dy } }));
                 // Set cursor to grabbing during drag
                 document.body.style.cursor = GRABBING_CURSOR;
                 return;
@@ -403,9 +441,9 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                         ? currentPoints[currentPoints.length - 1]
                         : { x: 0, y: 0 };
 
-                    // Add point if moved (lower threshold for smoother curves)
+                    // Add point if moved (lower threshold for much smoother curves)
                     const dist = Math.hypot(relativeX - lastPoint.x, relativeY - lastPoint.y);
-                    if (dist > 0.5) { // Lower threshold for smoother curves
+                    if (dist > 0.2) { // Extremely low threshold for precision
                         // Add the new point
                         const newPoints = [...currentPoints, { x: relativeX, y: relativeY, pressure: pos.pressure }];
 
@@ -471,7 +509,7 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 }
             }
         }
-    }, [appState, elements, getPointerPosLocal, setAppState, setElements, setTempElement, setCursorPos, setHighlightedElementId, setEraserTrail, setLaserTrails, currentLaserRef]);
+    }, [appState, elements, tempElement, getPointerPosLocal, setAppState, setElements, setTempElement, setCursorPos, setHighlightedElementId, setEraserTrail, setLaserTrails, currentLaserRef]);
 
     const handleMouseUp = useCallback((e: React.PointerEvent) => {
         // Reset cursor
@@ -506,8 +544,12 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 const minX = Math.min(...xs);
                 const minY = Math.min(...ys);
 
-                // Normalize points to start from (0,0)
-                const normalizedPoints = points.map(p => ({ x: p.x - minX, y: p.y - minY }));
+                // Normalize points to start from (0,0) while preserving pressure
+                const normalizedPoints = points.map(p => ({
+                    x: p.x - minX,
+                    y: p.y - minY,
+                    pressure: p.pressure
+                }));
                 const newX = tempElement.x + minX;
                 const newY = tempElement.y + minY;
                 const maxX = Math.max(...xs);
@@ -569,8 +611,8 @@ export const useEditorEvents = (props: UseEditorEventsProps) => {
                 setAppState(prev => ({ ...prev, tool: 'selection', selectedElementIds: [final.id] }));
             }
         } else if (appState.tool === 'selection' && appState.selectedElementIds.length > 0 && appState.selectionStart && !appState.selectionBox) {
-            const dx = pos.x - appState.selectionStart.x;
-            const dy = pos.y - appState.selectionStart.y;
+            const dx = appState.draggingOffset?.x ?? (pos.x - appState.selectionStart.x);
+            const dy = appState.draggingOffset?.y ?? (pos.y - appState.selectionStart.y);
             const selectedIds = new Set(appState.selectedElementIds);
 
             // Apply the final move to the elements array
